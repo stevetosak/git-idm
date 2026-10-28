@@ -11,12 +11,11 @@ import (
 )
 
 type fakePrompter struct {
-	t        *testing.T
-	answers  map[string][]string
-	asked    []string
-	errors   []string
-	choices  map[string][]Choice
-	statuses map[string]string
+	t       *testing.T
+	answers map[string][]string
+	asked   []string
+	errors  []string
+	choices map[string][]Choice
 }
 
 func (f *fakePrompter) next(title string) string {
@@ -43,16 +42,16 @@ func (f *fakePrompter) Input(title, _, value string, validate func(string) error
 	}
 }
 
-func (f *fakePrompter) PathInput(title, _ string, validate func(string) error, complete func(string) []string, status func(string) string) (string, error) {
-	complete("")
+func (f *fakePrompter) PathInput(q PathQuestion) (string, error) {
+	q.Complete("")
 	for {
-		answer := f.next(title)
-		if f.statuses == nil {
-			f.statuses = map[string]string{}
+		answer := f.next(q.Title)
+		q.Status(answer)
+		if answer == "" {
+			return "", nil
 		}
-		f.statuses[answer] = status(answer)
-		if err := validate(answer); err != nil {
-			f.errors = append(f.errors, title+": "+err.Error())
+		if err := q.Validate(answer); err != nil {
+			f.errors = append(f.errors, q.Title+": "+err.Error())
 			continue
 		}
 		return answer, nil
@@ -383,29 +382,27 @@ func TestWizardOrderAuthorEmailNameFirst(t *testing.T) {
 
 func TestWizardHomeMeansDefault(t *testing.T) {
 	sandbox(t)
-	for _, pick := range []struct{ dir, typed string }{{"default", ""}, {"type", "~"}} {
-		answers := map[string][]string{
-			"Author name":           {"Jane"},
-			"Email":                 {"jane@d.example"},
-			"Directory for d":       {pick.dir},
-			"SSH key":               {"none"},
-			"Prompt color":          {"<default>"},
-			"Create this identity?": {"yes"},
-		}
-		if pick.typed != "" {
-			answers["Directory path"] = []string{pick.typed}
-		}
-		f := &fakePrompter{t: t, answers: answers}
-		p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "d"}).Run()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !p.MakeDefault || p.BindDir != "" {
-			t.Fatalf("%s: plan = %+v", pick.dir, p)
-		}
-		if !strings.Contains(p.Summary(), "default for every folder without an identity") {
-			t.Errorf("summary: %s", p.Summary())
-		}
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Author name":           {"Jane"},
+		"Email":                 {"jane@d.example"},
+		"Directory for d":       {"type", "default"},
+		"Directory path":        {"~", ""},
+		"SSH key":               {"none"},
+		"Prompt color":          {"<default>"},
+		"Create this identity?": {"yes"},
+	}}
+	p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "d"}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.MakeDefault || p.BindDir != "" {
+		t.Fatalf("plan = %+v", p)
+	}
+	if len(f.errors) != 1 || !strings.Contains(f.errors[0], "choose ★ Use as the default") {
+		t.Fatalf("typing ~ must explain the default choice, errors = %v", f.errors)
+	}
+	if !strings.Contains(p.Summary(), "default for every folder without an identity") {
+		t.Errorf("summary: %s", p.Summary())
 	}
 }
 
@@ -474,7 +471,9 @@ func TestPathStatus(t *testing.T) {
 		"~/Repos": "✓ exists · 2 repos",
 		"~/New":   "+ new folder, created after you confirm",
 		"~/file":  "✗ this is a file",
-		"~":       "★ your home folder: makes it the default, replaces work",
+		"~":       "",
+		"~/Rep":   "",
+		"~/Zzz":   "+ new folder, created after you confirm",
 		"rel":     "",
 	} {
 		if got := w.pathStatus(in); got != want {

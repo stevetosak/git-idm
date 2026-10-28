@@ -392,17 +392,20 @@ func (w *Wizard) typeDir(p *Plan) (bool, error) {
 			return fmt.Errorf("%s is a file, not a directory", s)
 		}
 		if dirRulePath(s) == "~/" {
-			return nil
+			return fmt.Errorf("your home folder means the default; go back and choose ★ Use as the default")
 		}
 		return w.validateDir(config.ExpandHome(s))
 	}
-	dir, err := w.Prompt.PathInput("Directory path", "Every repo under it uses "+p.Name+". Tab completes. Leave empty to go back.", validate, CompleteDir, w.pathStatus)
+	dir, err := w.Prompt.PathInput(PathQuestion{
+		Title:       "Directory path",
+		Description: "Every repo under it uses " + p.Name + ". Leave empty to go back.",
+		Validate:    validate,
+		Complete:    CompleteDir,
+		Status:      w.pathStatus,
+		Describe:    func(s string) string { return w.describeDir(config.ExpandHome(s)) },
+	})
 	if err != nil || dir == "" {
 		return false, err
-	}
-	if dirRulePath(dir) == "~/" {
-		p.MakeDefault = true
-		return true, nil
 	}
 	p.BindDir = dirRulePath(dir)
 	p.CreateDir = !fileExists(config.ExpandHome(p.BindDir))
@@ -415,7 +418,7 @@ func (w *Wizard) pathStatus(s string) string {
 	}
 	path := config.ExpandHome(s)
 	if dirRulePath(s) == "~/" {
-		return "★ your home folder: " + defaultNote(w.Config.Default)
+		return ""
 	}
 	info, err := os.Stat(path)
 	switch {
@@ -430,14 +433,10 @@ func (w *Wizard) pathStatus(s string) string {
 		}
 		return "✓ exists"
 	}
-	return "+ new folder, created after you confirm"
-}
-
-func defaultNote(currentDefault string) string {
-	if currentDefault == "" {
-		return "makes it the default for every folder without an identity"
+	if !strings.HasSuffix(s, "/") && len(CompleteDir(s)) > 0 {
+		return ""
 	}
-	return "makes it the default, replaces " + currentDefault
+	return "+ new folder, created after you confirm"
 }
 
 func CompleteDir(input string) []string {
