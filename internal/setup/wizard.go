@@ -222,103 +222,73 @@ func (w *Wizard) askSSH(p *Plan) error {
 }
 
 func (w *Wizard) askDir(p *Plan) error {
-	home, err := os.UserHomeDir()
+	answer, err := w.Prompt.PickDir(DirQuestion{
+		Title:       "Directory for " + p.Name,
+		Description: "Every repo under the folder uses " + p.Name + ".",
+		Start:       "~/",
+		Entries:     w.dirEntries,
+		Status:      w.dirStatus,
+	})
 	if err != nil {
-		_, err := w.typeDir(p)
 		return err
 	}
-	cur := home
-	title := "Directory for " + p.Name
-	problem := ""
-	for {
-		description := "Every repo under the folder uses " + p.Name + ". Enter opens a folder, / searches.\nNow in: " + config.ContractHome(cur)
-		if note := w.insideRule(cur); note != "" {
-			description += "\n" + note
-		}
-		if problem != "" {
-			description += "\n✗ " + problem
-			problem = ""
-		}
-		choices, first := w.dirChoices(cur, cur == home)
-		pick, err := w.Prompt.Select(title, description, choices, first)
-		if err != nil {
-			return err
-		}
-		switch {
-		case pick == "default":
-			p.MakeDefault = true
-			return nil
-		case pick == "use":
-			if err := w.validateDir(cur); err != nil {
-				problem = err.Error()
-				continue
-			}
-			p.BindDir = dirRulePath(cur)
-			return nil
-		case pick == "new":
-			name, err := w.Prompt.Input("New folder in "+config.ContractHome(cur), "It is created after you confirm the summary. Leave empty to go back.", "", func(s string) error {
-				if s == "" {
-					return nil
-				}
-				if s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
-					return fmt.Errorf("enter a folder name without /")
-				}
-				target := filepath.Join(cur, s)
-				if fileExists(target) {
-					return fmt.Errorf("%s already exists", config.ContractHome(target))
-				}
-				return w.validateDir(target)
-			})
-			if err != nil {
-				return err
-			}
-			if name == "" {
-				continue
-			}
-			p.BindDir, p.CreateDir = dirRulePath(filepath.Join(cur, name)), true
-			return nil
-		case pick == "type":
-			done, err := w.typeDir(p)
-			if err != nil || done {
-				return err
-			}
-		case pick == "skip":
-			return nil
-		case pick == "up":
-			cur = filepath.Dir(cur)
-		default:
-			cur = filepath.Join(cur, strings.TrimPrefix(pick, "dir:"))
-		}
+	switch answer.Kind {
+	case DirDefault:
+		p.MakeDefault = true
+	case DirUse:
+		p.BindDir = answer.Path
+	case DirCreate:
+		p.BindDir, p.CreateDir = answer.Path, true
 	}
+	return nil
 }
 
-func (w *Wizard) dirChoices(cur string, atHome bool) ([]Choice, string) {
-	choices := []Choice{{"skip", "⨯ Skip (use it nowhere for now)"}}
-	first := "use"
-	if atHome {
+func (w *Wizard) dirEntries(input string) []DirEntry {
+	skip := DirEntry{Kind: DirSkip, Label: "⨯ Skip (use it nowhere for now)"}
+	if !strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "~") {
+		return []DirEntry{skip}
+	}
+	var entries []DirEntry
+	path := config.ExpandHome(input)
+	info, statErr := os.Stat(path)
+	matches := CompleteDir(input)
+	switch {
+	case dirRulePath(input) == "~/":
 		label := "★ Use as the default (every folder without an identity)"
 		if w.Config.Default != "" {
 			label += ", replaces " + w.Config.Default
 		}
-		choices = append(choices, Choice{"default", label})
-		first = "skip"
-	} else {
-		choices = append(choices, Choice{"use", "✓ Use " + config.ContractHome(cur)})
-	}
-	choices = append(choices,
-		Choice{"new", "+ New folder here…"},
-		Choice{"type", "✎ Type a path…"},
-	)
-	if filepath.Dir(cur) != cur {
-		choices = append(choices, Choice{"up", "↑ .."})
-	}
-	for _, e := range subdirs(cur) {
-		if first == "use" {
-			first = "dir:" + e
+		entries = append(entries, DirEntry{Kind: DirDefault, Label: label})
+	case statErr == nil && info.IsDir():
+		e := DirEntry{Kind: DirUse, Path: dirRulePath(input), Label: "✓ Use " + dirRulePath(input), Note: w.describeDir(path)}
+		if err := w.validateDir(path); err != nil {
+			e.Err, e.Note = err.Error(), ""
 		}
-		choices = append(choices, Choice{"dir:" + e, fmt.Sprintf("%-28s %s", e+"/", w.describeDir(filepath.Join(cur, e)))})
+		entries = append(entries, e)
+	case statErr == nil:
+	case strings.HasSuffix(input, "/") || len(matches) == 0:
+		e := DirEntry{Kind: DirCreate, Path: dirRulePath(input), Label: "+ Create " + dirRulePath(input) + " and use it"}
+		if err := w.validateDir(path); err != nil {
+			e.Err = err.Error()
+		}
+		entries = append(entries, e)
 	}
-	return choices, first
+	entries = append(entries, skip)
+	for _, m := range matches {
+		entries = append(entries, DirEntry{Kind: DirFolder, Path: m, Label: m, Note: w.describeDir(config.ExpandHome(m))})
+	}
+	return entries
+}
+
+func (w *Wizard) dirStatus(input string) string {
+	if !strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "~") {
+		return "✗ use a full path, for example ~/Clients"
+	}
+	path := config.ExpandHome(input)
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return "✗ this is a file"
+	}
+	return w.insideRule(path)
 }
 
 func (w *Wizard) describeDir(dir string) string {
@@ -380,65 +350,6 @@ func (w *Wizard) validateDir(dir string) error {
 	return nil
 }
 
-func (w *Wizard) typeDir(p *Plan) (bool, error) {
-	validate := func(s string) error {
-		if s == "" {
-			return nil
-		}
-		if !strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "~") {
-			return fmt.Errorf("use a full path, for example ~/Clients")
-		}
-		if info, err := os.Stat(config.ExpandHome(s)); err == nil && !info.IsDir() {
-			return fmt.Errorf("%s is a file, not a directory", s)
-		}
-		if dirRulePath(s) == "~/" {
-			return fmt.Errorf("your home folder means the default; go back and choose ★ Use as the default")
-		}
-		return w.validateDir(config.ExpandHome(s))
-	}
-	dir, err := w.Prompt.PathInput(PathQuestion{
-		Title:       "Directory path",
-		Description: "Every repo under it uses " + p.Name + ". Leave empty to go back.",
-		Validate:    validate,
-		Complete:    CompleteDir,
-		Status:      w.pathStatus,
-		Describe:    func(s string) string { return w.describeDir(config.ExpandHome(s)) },
-	})
-	if err != nil || dir == "" {
-		return false, err
-	}
-	p.BindDir = dirRulePath(dir)
-	p.CreateDir = !fileExists(config.ExpandHome(p.BindDir))
-	return true, nil
-}
-
-func (w *Wizard) pathStatus(s string) string {
-	if s == "" || (!strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "~")) {
-		return ""
-	}
-	path := config.ExpandHome(s)
-	if dirRulePath(s) == "~/" {
-		return ""
-	}
-	info, err := os.Stat(path)
-	switch {
-	case err == nil && !info.IsDir():
-		return "✗ this is a file"
-	case err == nil:
-		if verr := w.validateDir(path); verr != nil {
-			return "✗ " + verr.Error()
-		}
-		if d := w.describeDir(path); d != "" {
-			return "✓ exists · " + d
-		}
-		return "✓ exists"
-	}
-	if !strings.HasSuffix(s, "/") && len(CompleteDir(s)) > 0 {
-		return ""
-	}
-	return "+ new folder, created after you confirm"
-}
-
 func CompleteDir(input string) []string {
 	if input == "" {
 		input = "~/"
@@ -464,30 +375,14 @@ func CompleteDir(input string) []string {
 		if strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".") {
 			continue
 		}
+		if name == "Library" && prefix == "" && parent == "~/" {
+			continue
+		}
 		if !strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
 			continue
 		}
 		if e.IsDir() || (e.Type()&os.ModeSymlink != 0 && isDir(filepath.Join(config.ExpandHome(parent), name))) {
 			out = append(out, parent+name+"/")
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
-	return out
-}
-
-func subdirs(dir string) []string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") || name == "Library" {
-			continue
-		}
-		if e.IsDir() || (e.Type()&os.ModeSymlink != 0 && isDir(filepath.Join(dir, name))) {
-			out = append(out, name)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
@@ -586,15 +481,6 @@ func existingKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func required(what string) func(string) error {

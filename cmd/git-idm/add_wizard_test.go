@@ -61,8 +61,7 @@ esac
 		"Jane Doe",            // Author name
 		"jane@client.example", // Email
 		"",                    // Identity name: suggested "client"
-		"3",                   // Directory: new folder here (in ~)
-		"Clients",             // New folder name
+		"~/Clients",           // Directory: new folder (accessible mode takes a path)
 		"1",                   // GitHub account: log in
 		"1",                   // SSH key: generate
 		"1",                   // Key passphrase: none

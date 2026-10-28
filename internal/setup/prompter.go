@@ -16,7 +16,7 @@ type Choice struct {
 
 type Prompter interface {
 	Input(title, description, value string, validate func(string) error) (string, error)
-	PathInput(q PathQuestion) (string, error)
+	PickDir(q DirQuestion) (DirAnswer, error)
 	Select(title, description string, choices []Choice, value string) (string, error)
 	Confirm(title, description string, value bool) (bool, error)
 	Note(title, body string) error
@@ -63,11 +63,17 @@ func (p HuhPrompter) Input(title, description, value string, validate func(strin
 	return value, err
 }
 
-func (p HuhPrompter) PathInput(q PathQuestion) (string, error) {
-	if p.Accessible {
-		return p.Input(q.Title, q.Description, "", q.Validate)
+func (p HuhPrompter) PickDir(q DirQuestion) (DirAnswer, error) {
+	if !p.Accessible {
+		return runDirPicker(q, p.In, p.Out)
 	}
-	return runPathInput(q, p.In, p.Out)
+	var answer DirAnswer
+	_, err := p.Input(q.Title, q.Description+"\nEnter a full path, ~ for the default, or nothing to skip.", "", func(s string) error {
+		a, err := answerFromText(q, s)
+		answer = a
+		return err
+	})
+	return answer, err
 }
 
 func (p HuhPrompter) Select(title, description string, choices []Choice, value string) (string, error) {

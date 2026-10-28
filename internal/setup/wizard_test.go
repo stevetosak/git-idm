@@ -42,19 +42,23 @@ func (f *fakePrompter) Input(title, _, value string, validate func(string) error
 	}
 }
 
-func (f *fakePrompter) PathInput(q PathQuestion) (string, error) {
-	q.Complete("")
+func (f *fakePrompter) PickDir(q DirQuestion) (DirAnswer, error) {
+	q.Entries(q.Start)
 	for {
 		answer := f.next(q.Title)
-		q.Status(answer)
-		if answer == "" {
-			return "", nil
+		text := answer
+		switch answer {
+		case "skip":
+			text = ""
+		case "default":
+			text = "~"
 		}
-		if err := q.Validate(answer); err != nil {
+		a, err := answerFromText(q, text)
+		if err != nil {
 			f.errors = append(f.errors, q.Title+": "+err.Error())
 			continue
 		}
-		return answer, nil
+		return a, nil
 	}
 }
 
@@ -119,8 +123,7 @@ func TestWizardFullFlow(t *testing.T) {
 		"SSH key":                           {"generate"},
 		"Key passphrase":                    {"no"},
 		"Add the key to jane-gh on GitHub?": {"<default>"},
-		"Directory for client":              {"type"},
-		"Directory path":                    {"relative/dir", "~/Work", "~/Clients"},
+		"Directory for client":              {"relative/dir", "~/Work", "~/Clients"},
 		"Prompt color":                      {"<default>"},
 		"Create this identity?":             {"<default>"},
 	}}
@@ -263,81 +266,6 @@ func TestWizardWithoutGHSkipsGitHubQuestion(t *testing.T) {
 	}
 }
 
-func TestWizardBrowseDirectories(t *testing.T) {
-	home := sandbox(t)
-	for _, d := range []string{"Projects/a/.git", "Projects/b/.git", "Projects/plain", "Work", ".hidden", "Library"} {
-		os.MkdirAll(filepath.Join(home, d), 0o700)
-	}
-	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Author name":              {"Jane"},
-		"Email":                    {"jane@z.example"},
-		"SSH key":                  {"none"},
-		"Directory for z":          {"dir:Work", "use", "up", "dir:Projects", "dir:a", "up", "new"},
-		"New folder in ~/Projects": {"a", "x/y", "Clients"},
-		"Prompt color":             {"<default>"},
-		"Create this identity?":    {"yes"},
-	}}
-	var history [][]Choice
-	rec := &recordingPrompter{fakePrompter: f, onSelect: func(c []Choice) { history = append(history, c) }}
-	p, err := (&Wizard{Prompt: rec, Config: existing(), DefaultName: "z"}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.BindDir != "~/Projects/Clients/" || !p.CreateDir {
-		t.Fatalf("plan = %+v", p)
-	}
-	labels := func(c []Choice) string {
-		var l []string
-		for _, x := range c {
-			l = append(l, strings.Join(strings.Fields(x.Label), " "))
-		}
-		return strings.Join(l, " | ")
-	}
-	if rec.defaults[0] != "skip" || rec.defaults[4] != "dir:a" {
-		t.Errorf("cursor must start on skip at home and on the first folder elsewhere, got %v", rec.defaults)
-	}
-	homeView := labels(history[0])
-	if strings.Contains(homeView, "✓ Use ~") || !strings.Contains(homeView, "★ Use as the default (every folder without an identity), replaces work") {
-		t.Errorf("home must offer default, not a ~/ rule: %s", homeView)
-	}
-	if !strings.Contains(homeView, "Projects/ 2 repos") || !strings.Contains(homeView, "Work/ bound to work") ||
-		strings.Contains(homeView, ".hidden") || strings.Contains(homeView, "Library") {
-		t.Fatalf("home view: %s", homeView)
-	}
-	projectsView := labels(history[4])
-	if !strings.Contains(projectsView, "✓ Use ~/Projects") || !strings.Contains(projectsView, "a/ git repo") || !strings.Contains(projectsView, "plain/") {
-		t.Fatalf("projects view: %s", projectsView)
-	}
-	joined := strings.Join(f.errors, "\n")
-	for _, want := range []string{"~/Projects/a already exists", "without /"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("missing error %q in %v", want, f.errors)
-		}
-	}
-	if !strings.Contains(rec.descriptions[2], "✗ ~/Work/ is already bound to \"work\"") {
-		t.Errorf("binding a bound folder must show an error, got: %q", rec.descriptions[2])
-	}
-	if !strings.Contains(rec.descriptions[1], "This folder is bound to work") {
-		t.Errorf("inside a bound folder must say so, got: %q", rec.descriptions[1])
-	}
-}
-
-type recordingPrompter struct {
-	*fakePrompter
-	onSelect     func([]Choice)
-	descriptions []string
-	defaults     []string
-}
-
-func (r *recordingPrompter) Select(title, description string, choices []Choice, value string) (string, error) {
-	if strings.HasPrefix(title, "Directory for") {
-		r.onSelect(choices)
-		r.descriptions = append(r.descriptions, description)
-		r.defaults = append(r.defaults, value)
-	}
-	return r.fakePrompter.Select(title, description, choices, value)
-}
-
 func TestSuggestName(t *testing.T) {
 	for email, want := range map[string]string{
 		"jane@client.com":                 "client",
@@ -380,62 +308,6 @@ func TestWizardOrderAuthorEmailNameFirst(t *testing.T) {
 	}
 }
 
-func TestWizardHomeMeansDefault(t *testing.T) {
-	sandbox(t)
-	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Author name":           {"Jane"},
-		"Email":                 {"jane@d.example"},
-		"Directory for d":       {"type", "default"},
-		"Directory path":        {"~", ""},
-		"SSH key":               {"none"},
-		"Prompt color":          {"<default>"},
-		"Create this identity?": {"yes"},
-	}}
-	p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "d"}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !p.MakeDefault || p.BindDir != "" {
-		t.Fatalf("plan = %+v", p)
-	}
-	if len(f.errors) != 1 || !strings.Contains(f.errors[0], "choose ★ Use as the default") {
-		t.Fatalf("typing ~ must explain the default choice, errors = %v", f.errors)
-	}
-	if !strings.Contains(p.Summary(), "default for every folder without an identity") {
-		t.Errorf("summary: %s", p.Summary())
-	}
-}
-
-func TestWizardDirectoryInputsGoBack(t *testing.T) {
-	sandbox(t)
-	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Author name":           {"Jane"},
-		"Email":                 {"jane@b.example"},
-		"Directory for b":       {"type", "new", "skip"},
-		"Directory path":        {""},
-		"New folder in ~":       {""},
-		"SSH key":               {"none"},
-		"Prompt color":          {"<default>"},
-		"Create this identity?": {"yes"},
-	}}
-	p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "b"}).Run()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.BindDir != "" || p.MakeDefault {
-		t.Fatalf("plan = %+v", p)
-	}
-	browsed := 0
-	for _, q := range f.asked {
-		if q == "Directory for b" {
-			browsed++
-		}
-	}
-	if browsed != 3 {
-		t.Fatalf("an empty answer must return to the folder list, asked: %v", f.asked)
-	}
-}
-
 func TestCompleteDir(t *testing.T) {
 	home := sandbox(t)
 	for _, d := range []string{"Projects/x", "Personal", "private", ".hidden"} {
@@ -459,25 +331,89 @@ func TestCompleteDir(t *testing.T) {
 	}
 }
 
-func TestPathStatus(t *testing.T) {
+func dirFixture(t *testing.T) (string, *Wizard) {
+	t.Helper()
 	home := sandbox(t)
-	for _, d := range []string{"Work", "Repos/a/.git", "Repos/b/.git"} {
+	for _, d := range []string{"Projects/a/.git", "Projects/b/.git", "Projects/plain", "Work/sub", "Library", ".hidden"} {
 		os.MkdirAll(filepath.Join(home, d), 0o700)
 	}
 	os.WriteFile(filepath.Join(home, "file"), []byte("x"), 0o600)
-	w := &Wizard{Config: existing()}
-	for in, want := range map[string]string{
-		"~/Work":  "✗ ~/Work/ is already bound to \"work\"",
-		"~/Repos": "✓ exists · 2 repos",
-		"~/New":   "+ new folder, created after you confirm",
-		"~/file":  "✗ this is a file",
-		"~":       "",
-		"~/Rep":   "",
-		"~/Zzz":   "+ new folder, created after you confirm",
-		"rel":     "",
+	return home, &Wizard{Config: existing()}
+}
+
+func describe(entries []DirEntry) string {
+	var out []string
+	for _, e := range entries {
+		s := string(e.Kind) + ":" + e.Path
+		if e.Note != "" {
+			s += "(" + e.Note + ")"
+		}
+		if e.Err != "" {
+			s += "!"
+		}
+		out = append(out, s)
+	}
+	return strings.Join(out, " ")
+}
+
+func TestDirEntries(t *testing.T) {
+	_, w := dirFixture(t)
+	for input, want := range map[string]string{
+		"~/":          "default: skip: dir:~/Projects/(2 repos) dir:~/Work/(bound to work)",
+		"~/P":         "skip: dir:~/Projects/(2 repos)",
+		"~/Projects":  "use:~/Projects/(2 repos) skip: dir:~/Projects/(2 repos)",
+		"~/Projects/": "use:~/Projects/(2 repos) skip: dir:~/Projects/a/(git repo) dir:~/Projects/b/(git repo) dir:~/Projects/plain/",
+		"~/Work/":     "use:~/Work/! skip: dir:~/Work/sub/",
+		"~/Clients":   "create:~/Clients/ skip:",
+		"~/file":      "skip:",
+		"~/.h":        "skip: dir:~/.hidden/",
+		"relative":    "skip:",
 	} {
-		if got := w.pathStatus(in); got != want {
-			t.Errorf("pathStatus(%q) = %q, want %q", in, got, want)
+		if got := describe(w.dirEntries(input)); got != want {
+			t.Errorf("dirEntries(%q)\n got  %s\n want %s", input, got, want)
+		}
+	}
+	if label := w.dirEntries("~/")[0].Label; !strings.Contains(label, "replaces work") {
+		t.Errorf("default label: %s", label)
+	}
+}
+
+func TestDirStatus(t *testing.T) {
+	_, w := dirFixture(t)
+	for input, want := range map[string]string{
+		"~/Work/sub/": "Inside ~/Work/ (work). A rule here wins for repos below it.",
+		"~/Work/":     "This folder is bound to work. Pick a folder inside it, or another folder.",
+		"~/file":      "✗ this is a file",
+		"relative":    "✗ use a full path, for example ~/Clients",
+		"~/Projects/": "",
+	} {
+		if got := w.dirStatus(input); got != want {
+			t.Errorf("dirStatus(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestWizardDirectoryAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		answers []string
+		want    Plan
+		errors  int
+	}{
+		{[]string{"skip"}, Plan{}, 0},
+		{[]string{"default"}, Plan{MakeDefault: true}, 0},
+		{[]string{"~/Work", "~/Projects/"}, Plan{BindDir: "~/Projects/"}, 1},
+		{[]string{"~/New/Deep"}, Plan{BindDir: "~/New/Deep/", CreateDir: true}, 0},
+	} {
+		_, w := dirFixture(t)
+		f := &fakePrompter{t: t, answers: map[string][]string{"Directory for q": tc.answers}}
+		w.Prompt = f
+		var p Plan
+		p.Name = "q"
+		if err := w.askDir(&p); err != nil {
+			t.Fatal(err)
+		}
+		if p.MakeDefault != tc.want.MakeDefault || p.BindDir != tc.want.BindDir || p.CreateDir != tc.want.CreateDir || len(f.errors) != tc.errors {
+			t.Errorf("%v: plan=%+v errors=%v", tc.answers, p, f.errors)
 		}
 	}
 }
