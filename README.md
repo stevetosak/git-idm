@@ -32,7 +32,7 @@ With Go: `go install github.com/stevetosak/git-idm/cmd/git-idm@latest`
 ## Quick start
 
 ```sh
-git-idm init                      # import your current git, SSH and gh setup
+git-idm init                      # import your git, SSH and gh setup and repo authors
 git-idm add                       # or create a new identity, step by step
 git-idm bind work ~/Projects/work # use "work" for every repo in this folder
 git-idm                           # show the identity for this folder
@@ -56,11 +56,11 @@ echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 | `bind <identity> [dir] --temp` | use it for a short time, until `unbind` |
 | `unbind [dir]` | stop using an identity in a folder |
 | `use <identity>` | switch identity in this shell only |
-| `doctor` | check keys, gh logins, tokens, hooks and the shell |
+| `doctor` | check keys, gh logins, tokens, hooks, the shell and repo configs |
 | `login [identity]` | log in to GitHub again when a token stops working |
 | `guard block\|warn\|off` | stop or warn about commits with the wrong author |
 | `allow` | accept the author that one repo sets itself |
-| `init`, `migrate` | import your old setup, then remove it |
+| `init`, `migrate` | import your old setup and repo authors, then remove them |
 | `update` | update to the latest release |
 
 Run `git-idm <command> --help` for flags and examples.

@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/guard"
+	"github.com/stevetosak/git-idm/internal/resolve"
 )
 
 func TestGuardEndToEnd(t *testing.T) {
@@ -88,5 +93,24 @@ git-idm guard off >/dev/null; print -r -- "hooksPath after off: $(git config --g
 		if got[i] != want[i] {
 			t.Errorf("line %d:\n got  %s\n want %s", i, got[i], want[i])
 		}
+	}
+}
+
+func TestMismatchHintForLocalAuthor(t *testing.T) {
+	c := config.New()
+	c.Guard = config.GuardBlock
+	v := guard.Verdict{Actual: "martin@old.example", Expected: "w@x.example", ExpectedFrom: "W"}
+	rule := &config.Rule{Path: "~/Projects/", Identity: "work"}
+
+	var out bytes.Buffer
+	printMismatch(&out, c, resolve.Result{Identity: "work", Source: resolve.SourceRule, Rule: rule, LocalEmail: "martin@old.example"}, v)
+	if !strings.Contains(out.String(), "git-idm migrate") || strings.Contains(out.String(), "--unset") {
+		t.Errorf("under a rule:\n%s", out.String())
+	}
+
+	out.Reset()
+	printMismatch(&out, c, resolve.Result{Identity: "work", Source: resolve.SourceDefault, LocalEmail: "martin@old.example"}, v)
+	if !strings.Contains(out.String(), "git config --local --unset-all user.email") || strings.Contains(out.String(), "migrate") {
+		t.Errorf("without a rule:\n%s", out.String())
 	}
 }

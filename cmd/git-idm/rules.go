@@ -109,7 +109,7 @@ func newMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Remove the old setup that git-idm replaced",
-		Long:  "Remove old includeIf entries, identity files and .envrc lines that git-idm rules now cover.\nEvery changed file is backed up first.",
+		Long:  "Remove old includeIf entries, identity files, .envrc lines and repo author keys that git-idm rules now cover.\nEvery changed file is backed up first.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -125,7 +125,11 @@ func newMigrateCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules))
+			scan := importer.ScanRules(c.Rules)
+			if scan.Truncated {
+				fmt.Fprintln(out, "repo scan stopped early, run migrate again for the rest")
+			}
+			legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, scan.Repos))
 			if len(legacy) == 0 {
 				fmt.Fprintln(out, "nothing to migrate")
 				return nil

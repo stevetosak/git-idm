@@ -167,3 +167,65 @@ func TestApplyThenMigrateKeepsAuthors(t *testing.T) {
 		t.Fatalf("re-import must find no legacy setup: %+v", again.Legacy)
 	}
 }
+
+func TestMigrateRemovesLocalAuthorKeys(t *testing.T) {
+	home := sandbox(t)
+	repo := filepath.Join(home, "Personal", "old")
+	commitAuthor(t, repo)
+	for _, args := range [][]string{
+		{"config", "--add", "user.name", "Martin"}, {"config", "--add", "user.name", "Martin"},
+		{"config", "user.email", "martin@old.example"}, {"config", "core.autocrlf", "input"},
+	} {
+		run(t, repo, args...)
+	}
+
+	res, err := importer.Import(importer.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Config
+	a, err := gitgen.NewApplier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Apply(c); err != nil {
+		t.Fatal(err)
+	}
+	legacy := importer.LocalLegacy(c, importer.ScanRules(c.Rules).Repos)
+	if len(legacy) != 1 {
+		t.Fatalf("legacy = %+v", legacy)
+	}
+
+	steps, err := Run(c, a, legacy, Options{DryRun: true})
+	if err != nil || !strings.HasPrefix(steps[0].Done, "would remove") {
+		t.Fatalf("dry run: %v %+v", err, steps)
+	}
+	if got := commitAuthor(t, repo); got != "Martin <martin@old.example>" {
+		t.Fatalf("dry run changed the author: %q", got)
+	}
+
+	steps, err = Run(c, a, legacy, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(steps[0].Done, "removed user.name, user.email") {
+		t.Fatalf("steps = %+v", steps)
+	}
+	if got := commitAuthor(t, repo); got != "Jane Doe <jane@home.example>" {
+		t.Fatalf("author after migrate = %q", got)
+	}
+	if got := run(t, repo, "config", "--local", "core.autocrlf"); got != "input" {
+		t.Fatalf("other keys must stay, core.autocrlf = %q", got)
+	}
+	backups, _ := filepath.Glob(filepath.Join(home, ".config", "git-idm", "backups", "*", "old.git-config"))
+	if len(backups) != 1 {
+		t.Fatalf("backup = %v", backups)
+	}
+	data, _ := os.ReadFile(backups[0])
+	if !strings.Contains(string(data), "martin@old.example") {
+		t.Fatalf("backup content:\n%s", data)
+	}
+	if again := importer.LocalLegacy(c, importer.ScanRules(c.Rules).Repos); len(again) != 0 {
+		t.Fatalf("second scan = %+v", again)
+	}
+}

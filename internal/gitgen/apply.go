@@ -137,6 +137,13 @@ func (a *Applier) Backup(path string) (string, error) {
 	if strings.HasSuffix(filepath.Base(path), ".envrc") {
 		name = filepath.Base(filepath.Dir(path)) + ".envrc"
 	}
+	if filepath.Base(path) == "config" {
+		dir := filepath.Dir(path)
+		if filepath.Base(dir) == ".git" {
+			dir = filepath.Dir(dir)
+		}
+		name = filepath.Base(dir) + ".git-config"
+	}
 	dst := filepath.Join(a.backupDir, name)
 	for i := 1; fileExists(dst); i++ {
 		dst = filepath.Join(a.backupDir, fmt.Sprintf("%s.%d", name, i))

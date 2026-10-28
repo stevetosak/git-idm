@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/localid"
 )
 
 type LegacyKind string
@@ -16,6 +17,7 @@ const (
 	LegacyInclude LegacyKind = "include"
 	LegacyFile    LegacyKind = "file"
 	LegacyEnvrc   LegacyKind = "envrc"
+	LegacyLocal   LegacyKind = "local"
 )
 
 type Legacy struct {
@@ -24,6 +26,10 @@ type Legacy struct {
 	Detail    string
 	Condition string
 	RulePath  string
+	Config    string
+	Keys      []string
+	Summary   string
+	Author    string
 }
 
 type Result struct {
@@ -31,10 +37,13 @@ type Result struct {
 	Findings []string
 	Skipped  []string
 	Legacy   []Legacy
+	Repos    []localid.Repo
 }
 
 type Options struct {
 	DefaultName string
+	Scan        []string
+	Exclude     []string
 }
 
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -56,6 +65,9 @@ func Import(opts Options) (*Result, error) {
 	}
 	for _, inc := range global.includeIfs() {
 		res.importInclude(global, inc)
+	}
+	if len(opts.Scan) > 0 {
+		res.importRepos(global, opts)
 	}
 	if err := res.Config.Validate(); err != nil {
 		return nil, fmt.Errorf("imported config is not valid: %w", err)
