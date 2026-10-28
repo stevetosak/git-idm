@@ -183,7 +183,7 @@ func listView(t *ui.Theme, c *config.Config, active string, long bool) string {
 			used = append(used, "★ default")
 		}
 		for _, r := range c.RulesFor(name) {
-			used = append(used, r.Path)
+			used = append(used, r.Path+temporaryNote(t, r))
 		}
 		where := strings.Join(used, ", ")
 		if where == "" {
@@ -208,4 +208,11 @@ func orDash(t *ui.Theme, s string) string {
 		return t.Dim("-")
 	}
 	return s
+}
+
+func temporaryNote(t *ui.Theme, r config.Rule) string {
+	if !r.Temporary {
+		return ""
+	}
+	return " " + t.Warn("("+temporaryText(&r)+")")
 }

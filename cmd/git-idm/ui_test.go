@@ -157,3 +157,23 @@ func TestStatusWithoutConfigShowsWelcome(t *testing.T) {
 		t.Fatal("status must not create files")
 	}
 }
+
+func TestTemporaryBindingIsVisible(t *testing.T) {
+	uiEnv(t)
+	c := uiConfig()
+	c.Rules = []config.Rule{{Path: "~/Personal/", Identity: "spare", Temporary: true, Was: "personal"}}
+	res := resolve.Result{Identity: "spare", Source: resolve.SourceRule, Rule: &c.Rules[0], RuleIdentity: "spare"}
+	got := statusView(plain(), c, res)
+	for _, want := range []string{"● spare  temporary", "why  temporary rule ~/Personal/", "was  personal", "end  git-idm unbind ~/Personal/"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if list := listView(plain(), c, "spare", false); !strings.Contains(list, "~/Personal/ (temporary, was personal)") {
+		t.Errorf("ls:\n%s", list)
+	}
+	c.Rules[0].Was = ""
+	if got := statusView(plain(), c, res); strings.Contains(got, "was ") || !strings.Contains(got, "end  git-idm unbind ~/Personal/") {
+		t.Errorf("without an old identity:\n%s", got)
+	}
+}

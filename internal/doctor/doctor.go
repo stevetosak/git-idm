@@ -68,6 +68,17 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens)...)
 	}
 
+	for _, r := range c.Rules {
+		if !r.Temporary {
+			continue
+		}
+		was := ""
+		if r.Was != "" {
+			was = " (was " + r.Was + ")"
+		}
+		add(Info, "git-idm unbind "+r.Path, "%s uses %s temporarily%s", r.Path, r.Identity, was)
+	}
+
 	checks = append(checks, guardChecks(c, a, string(global))...)
 
 	if env.ShellHook {

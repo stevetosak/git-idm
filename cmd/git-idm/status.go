@@ -55,11 +55,19 @@ func statusView(t *ui.Theme, c *config.Config, res resolve.Result) string {
 	id := c.Identities[res.Identity]
 	border := id.Color
 	header := t.Colored("●", id.Color) + " " + t.Identity(res.Identity, id.Color)
-	if res.Source == resolve.SourceOverride {
+	rows := [][2]string{{"why", whyText(t, res)}}
+	switch {
+	case res.Source == resolve.SourceOverride:
 		border = "red"
 		header = t.Alert("● "+res.Identity) + "  " + t.Alert("override")
+	case res.Temporary():
+		border = "yellow"
+		header = t.Identity("● "+res.Identity, "yellow") + "  " + t.Identity("temporary", "yellow")
+		if res.Rule.Was != "" {
+			rows = append(rows, [2]string{"was", res.Rule.Was})
+		}
+		rows = append(rows, [2]string{"end", "git-idm unbind " + res.Rule.Path})
 	}
-	rows := [][2]string{{"why", whyText(t, res)}}
 	if res.RepoRoot != "" {
 		rows = append(rows, [2]string{"repo", config.ContractHome(res.RepoRoot)})
 	}
@@ -94,6 +102,9 @@ func whyText(t *ui.Theme, res resolve.Result) string {
 		}
 		return s + "\n" + t.Dim("clear: git-idm use --clear")
 	case resolve.SourceRule:
+		if res.Temporary() {
+			return "temporary rule " + res.Rule.Path
+		}
 		return "rule " + res.Rule.Path
 	case resolve.SourceDefault:
 		return "★ default (no rule matches here)"
@@ -116,8 +127,11 @@ func newPromptCmd() *cobra.Command {
 				return nil
 			}
 			label := res.Identity
-			if res.Source == resolve.SourceOverride {
+			switch {
+			case res.Source == resolve.SourceOverride:
 				label += " (override)"
+			case res.Temporary():
+				label += " (temp)"
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), label)
 			return nil
@@ -134,6 +148,9 @@ func reason(res resolve.Result) string {
 		}
 		return s + ", clear with: git-idm use --clear"
 	case resolve.SourceRule:
+		if res.Temporary() {
+			return "temporary rule " + res.Rule.Path
+		}
 		return "rule " + res.Rule.Path
 	case resolve.SourceDefault:
 		return "default (no rule matches)"

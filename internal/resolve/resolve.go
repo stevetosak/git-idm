@@ -31,6 +31,10 @@ type Result struct {
 	LocalEmail   string
 }
 
+func (r Result) Temporary() bool {
+	return r.Source == SourceRule && r.Rule != nil && r.Rule.Temporary
+}
+
 func Resolve(c *config.Config, cwd, override string) Result {
 	var res Result
 	matchPath := cwd

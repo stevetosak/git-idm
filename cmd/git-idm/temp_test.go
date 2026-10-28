@@ -41,6 +41,10 @@ $g apply >/dev/null
 echo "before: $(git config user.email)"
 $g bind client ~/Work/ --temp
 echo "temp: $(git config user.email)"
+$g guard block >/dev/null
+git commit -q --allow-empty -m temp 2>&1
+$g doctor 2>/dev/null | grep temporarily || true
+$g guard off >/dev/null
 $g unbind ~/Work/
 echo "after: $(git config user.email)"
 cd ~/Other/repo
@@ -59,6 +63,8 @@ echo "new after: $(git config user.email || echo none)"
 		"before: w@x.example",
 		"~/Work/ uses client for now, instead of work. End with: git-idm unbind ~/Work/",
 		"temp: c@x.example",
+		"git-idm: committing as client (temporary, was work)",
+		"i ~/Work/ uses client temporarily (was work)",
 		"ended the temporary binding: ~/Work/ uses work again",
 		"after: w@x.example",
 		"~/Other/repo/ uses client for now. End with: git-idm unbind ~/Other/repo/",

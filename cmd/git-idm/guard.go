@@ -117,6 +117,9 @@ func newCheckCommitCmd() *cobra.Command {
 				return nil
 			}
 			if v.OK() {
+				if res.Temporary() {
+					fmt.Fprintln(cmd.ErrOrStderr(), "git-idm: committing as "+res.Identity+" ("+temporaryText(res.Rule)+")")
+				}
 				return nil
 			}
 			printMismatch(cmd.ErrOrStderr(), c, res, v)
@@ -161,4 +164,11 @@ func globalHooksPathOutsideBlock() string {
 		return ""
 	}
 	return gitgen.HooksPathOutsideBlock(string(data))
+}
+
+func temporaryText(r *config.Rule) string {
+	if r.Was != "" {
+		return "temporary, was " + r.Was
+	}
+	return "temporary"
 }

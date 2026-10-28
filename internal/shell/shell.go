@@ -106,9 +106,15 @@ func Segment(c *config.Config, res resolve.Result) string {
 	if res.Source == resolve.SourceOverride {
 		return "%B%F{red}" + escapePrompt(label) + " (override)%f%b"
 	}
+	if res.Temporary() {
+		label += " (temp)"
+	}
 	if res.LocalEmail != "" && !strings.EqualFold(res.LocalEmail, c.Identities[res.Identity].Email) {
 		label += " (repo user)"
 		color = "yellow"
+	}
+	if res.Temporary() {
+		return "%B%F{yellow}" + escapePrompt(label) + "%f%b"
 	}
 	return "%F{" + color + "}" + escapePrompt(label) + "%f"
 }
