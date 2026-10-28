@@ -11,40 +11,31 @@ import (
 	"github.com/stevetosak/git-idm/internal/resolve"
 )
 
+type Shell string
+
+const (
+	Zsh  Shell = "zsh"
+	Bash Shell = "bash"
+)
+
+var Supported = []Shell{Zsh, Bash}
+
+func Parse(name string) (Shell, error) {
+	for _, sh := range Supported {
+		if string(sh) == name {
+			return sh, nil
+		}
+	}
+	return "", fmt.Errorf("shell %q is not supported (supported: zsh, bash)", name)
+}
+
 const (
 	SegmentVar = "_GIT_IDM_SEGMENT"
 	ghEnv      = "GH_CONFIG_DIR"
 	countEnv   = "GIT_CONFIG_COUNT"
 )
 
-func ZshHook(bin string) string {
-	return `typeset -g _GIT_IDM_BIN=` + gitgen.ShellQuote(bin) + `
-git-idm() {
-  if [[ "$1" == use ]]; then
-    local out
-    out="$("$_GIT_IDM_BIN" use --shell "${@:2}")" && eval "$out"
-  else
-    "$_GIT_IDM_BIN" "$@"
-    local rc=$?
-    _git_idm_sync
-    return $rc
-  fi
-}
-_git_idm_sync() {
-  local out
-  out="$("$_GIT_IDM_BIN" env --shell 2>/dev/null)" && eval "$out"
-}
-autoload -Uz add-zsh-hook
-add-zsh-hook chpwd _git_idm_sync
-_git_idm_sync
-setopt prompt_subst
-if [[ "$RPROMPT" != *` + SegmentVar + `* ]]; then
-  RPROMPT='${` + SegmentVar + `}'"${RPROMPT:+ $RPROMPT}"
-fi
-`
-}
-
-func Sync(c *config.Config, res resolve.Result) string {
+func Sync(sh Shell, c *config.Config, res resolve.Result) string {
 	var b strings.Builder
 	id, known := c.Identities[res.Identity]
 	if known && id.GHConfigDir != "" {
@@ -52,11 +43,11 @@ func Sync(c *config.Config, res resolve.Result) string {
 	} else {
 		fmt.Fprintf(&b, "unset %s\n", ghEnv)
 	}
-	export(&b, SegmentVar, Segment(c, res))
+	export(&b, SegmentVar, Segment(sh, c, res))
 	return b.String()
 }
 
-func Use(c *config.Config, name string, res resolve.Result) (string, error) {
+func Use(sh Shell, c *config.Config, name string, res resolve.Result) (string, error) {
 	id, ok := c.Identities[name]
 	if !ok {
 		return "", fmt.Errorf("identity %q does not exist", name)
@@ -74,12 +65,12 @@ func Use(c *config.Config, name string, res resolve.Result) (string, error) {
 	}
 	export(&b, countEnv, strconv.Itoa(len(entries)))
 	export(&b, resolve.OverrideEnv, name)
-	b.WriteString(Sync(c, res))
+	b.WriteString(Sync(sh, c, res))
 	return b.String(), nil
 }
 
-func Clear(c *config.Config, res resolve.Result) string {
-	return clearOverride() + Sync(c, res)
+func Clear(sh Shell, c *config.Config, res resolve.Result) string {
+	return clearOverride() + Sync(sh, c, res)
 }
 
 func clearOverride() string {
@@ -95,7 +86,7 @@ func clearOverride() string {
 	return b.String()
 }
 
-func Segment(c *config.Config, res resolve.Result) string {
+func Segment(sh Shell, c *config.Config, res resolve.Result) string {
 	if res.Identity == "" {
 		return ""
 	}
@@ -105,7 +96,7 @@ func Segment(c *config.Config, res resolve.Result) string {
 	}
 	label := res.Identity
 	if res.Source == resolve.SourceOverride {
-		return "%B%F{red}" + escapePrompt(label) + " (override)%f%b"
+		return paint(sh, label+" (override)", "red", true)
 	}
 	if res.Temporary() {
 		label += " (temp)"
@@ -115,13 +106,29 @@ func Segment(c *config.Config, res resolve.Result) string {
 		color = "yellow"
 	}
 	if res.Temporary() {
-		return "%B%F{yellow}" + escapePrompt(label) + "%f%b"
+		return paint(sh, label, "yellow", true)
 	}
-	return "%F{" + color + "}" + escapePrompt(label) + "%f"
+	return paint(sh, label, color, false)
 }
 
-func escapePrompt(s string) string {
-	return strings.ReplaceAll(s, "%", "%%")
+var ansiColors = map[string]string{"red": "31", "green": "32", "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37"}
+
+func paint(sh Shell, label, color string, bold bool) string {
+	if sh == Zsh {
+		label = "%F{" + color + "}" + strings.ReplaceAll(label, "%", "%%") + "%f"
+		if bold {
+			label = "%B" + label + "%b"
+		}
+		return label
+	}
+	code := ansiColors[color]
+	if code == "" {
+		code = ansiColors["cyan"]
+	}
+	if bold {
+		code = "1;" + code
+	}
+	return "\x01\x1b[" + code + "m\x02" + label + "\x01\x1b[0m\x02"
 }
 
 func export(b *strings.Builder, key, value string) {

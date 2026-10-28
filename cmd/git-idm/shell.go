@@ -7,66 +7,87 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/resolve"
 	"github.com/stevetosak/git-idm/internal/shell"
 )
 
-const hookHint = "add this line to ~/.zshrc: eval \"$(git-idm hook zsh)\""
+func hookHint() string {
+	if filepath.Base(os.Getenv("SHELL")) == string(shell.Bash) {
+		return "add this line to ~/.bashrc: eval \"$(git-idm hook bash)\""
+	}
+	return "add this line to ~/.zshrc: eval \"$(git-idm hook zsh)\""
+}
 
 func newHookCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:       "hook zsh",
-		Example:   `  echo 'eval "$(git-idm hook zsh)"' >> ~/.zshrc`,
-		Short:     "Print the shell hook for ~/.zshrc",
+		Use: "hook <zsh|bash>",
+		Example: "  echo 'eval \"$(git-idm hook zsh)\"' >> ~/.zshrc\n" +
+			"  echo 'eval \"$(git-idm hook bash)\"' >> ~/.bashrc",
+		Short:     "Print the shell hook for ~/.zshrc or ~/.bashrc",
+		Long:      "The hook sets GH_CONFIG_DIR when you change folders, makes git-idm use work, and shows the identity in the prompt.",
 		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"zsh"},
+		ValidArgs: []string{string(shell.Zsh), string(shell.Bash)},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[0] != "zsh" {
-				return fmt.Errorf("shell %q is not supported yet (supported: zsh)", args[0])
-			}
-			bin, err := os.Executable()
+			sh, err := shell.Parse(args[0])
 			if err != nil {
 				return err
 			}
-			if real, err := filepath.EvalSymlinks(bin); err == nil {
-				bin = real
+			bin, err := gitgen.Executable()
+			if err != nil {
+				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), shell.ZshHook(bin))
+			fmt.Fprint(cmd.OutOrStdout(), shell.Hook(sh, bin))
 			return nil
 		},
 	}
 }
 
+func addShellFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVar(target, "shell", "", "print shell code for this shell (used by the hook)")
+	cmd.Flags().Lookup("shell").NoOptDefVal = string(shell.Zsh)
+	_ = cmd.Flags().MarkHidden("shell")
+}
+
 func newEnvCmd() *cobra.Command {
-	var forShell bool
+	var forShell string
 	cmd := &cobra.Command{
 		Use:    "env",
 		Short:  "Print shell code for the current directory (used by the hook)",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			sh, err := shell.Parse(orDefault(forShell))
+			if err != nil {
+				return err
+			}
 			c, res, err := current()
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), shell.Sync(c, res))
+			fmt.Fprint(cmd.OutOrStdout(), shell.Sync(sh, c, res))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&forShell, "shell", false, "")
+	addShellFlag(cmd, &forShell)
 	return cmd
 }
 
 func newUseCmd() *cobra.Command {
-	var forShell, clear bool
+	var forShell string
+	var clear bool
 	cmd := &cobra.Command{
 		Use:     "use <identity> | --clear",
 		Short:   "Switch identity in this shell only",
 		Example: "  git-idm use client\n  git-idm use --clear",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !forShell {
-				return fmt.Errorf("`use` needs the shell hook: %s", hookHint)
+			if forShell == "" {
+				return fmt.Errorf("`use` needs the shell hook: %s", hookHint())
+			}
+			sh, err := shell.Parse(forShell)
+			if err != nil {
+				return err
 			}
 			if clear == (len(args) == 1) {
 				return usageError(cmd, "use needs <identity> or --clear, not both")
@@ -82,13 +103,13 @@ func newUseCmd() *cobra.Command {
 			errOut := cmd.ErrOrStderr()
 			if clear {
 				res := resolve.Resolve(c, cwd, "")
-				fmt.Fprint(cmd.OutOrStdout(), shell.Clear(c, res))
+				fmt.Fprint(cmd.OutOrStdout(), shell.Clear(sh, c, res))
 				fmt.Fprintf(errOut, "override cleared, %s is active: %s\n", res.Identity, reason(res))
 				return nil
 			}
 			name := args[0]
 			res := resolve.Resolve(c, cwd, name)
-			code, err := shell.Use(c, name, res)
+			code, err := shell.Use(sh, c, name, res)
 			if err != nil {
 				return err
 			}
@@ -97,10 +118,16 @@ func newUseCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&forShell, "shell", false, "print shell code (used by the hook)")
-	_ = cmd.Flags().MarkHidden("shell")
+	addShellFlag(cmd, &forShell)
 	cmd.Flags().BoolVar(&clear, "clear", false, "go back to directory rules")
 	return cmd
+}
+
+func orDefault(name string) string {
+	if name == "" {
+		return string(shell.Zsh)
+	}
+	return name
 }
 
 func current() (*config.Config, resolve.Result, error) {

@@ -24,7 +24,7 @@ func TestSegment(t *testing.T) {
 		{resolve.Result{}, ""},
 	}
 	for _, tc := range cases {
-		if got := Segment(c, tc.res); got != tc.want {
+		if got := Segment(Zsh, c, tc.res); got != tc.want {
 			t.Errorf("Segment(%+v) = %q, want %q", tc.res, got, tc.want)
 		}
 	}
