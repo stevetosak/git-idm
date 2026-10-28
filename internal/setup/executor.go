@@ -1,14 +1,17 @@
 package setup
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ type Tools struct {
 	GH        string
 	SSHKeygen string
 	SSH       string
+	Open      string
 }
 
 func FindTools() Tools {
@@ -29,7 +33,11 @@ func FindTools() Tools {
 		}
 		return ""
 	}
-	return Tools{GH: look("gh"), SSHKeygen: look("ssh-keygen"), SSH: look("ssh")}
+	open := look("open")
+	if runtime.GOOS != "darwin" {
+		open = look("xdg-open")
+	}
+	return Tools{GH: look("gh"), SSHKeygen: look("ssh-keygen"), SSH: look("ssh"), Open: open}
 }
 
 type Executor struct {
@@ -55,8 +63,8 @@ func (e *Executor) Check(p Plan) error {
 	if p.SSH == SSHGenerate && e.Tools.SSHKeygen == "" {
 		return fmt.Errorf("ssh-keygen is not installed")
 	}
-	if p.GHLogin && e.Tools.GH == "" {
-		return fmt.Errorf("gh is not installed (https://cli.github.com), or choose Skip for GitHub")
+	if p.Upload && e.Tools.GH == "" {
+		return fmt.Errorf("gh is not installed (https://cli.github.com)")
 	}
 	return nil
 }
@@ -82,17 +90,14 @@ func (e *Executor) Run(p Plan) (config.Identity, *Report, error) {
 			id.SigningKey = p.SSHKey + ".pub"
 		}
 	}
-	if p.GHLogin {
-		dir := filepath.Join(e.ConfigDir, "gh", p.Name)
-		if err := e.ghLogin(p, dir); err != nil {
-			return fail("gh login", err)
+	if p.GHUser != "" {
+		id.GHConfigDir = config.ContractHome(p.GHConfigDir)
+		id.GHUser = p.GHUser
+		if p.SSH != SSHNone {
+			if err := e.gh(p.GHConfigDir, "config", "set", "--host", "github.com", "git_protocol", "ssh"); err != nil {
+				return fail("set gh git protocol", err)
+			}
 		}
-		id.GHConfigDir = config.ContractHome(dir)
-		id.GHUser = importer.GHUserFromConfigDir(dir)
-		if id.GHUser == "" {
-			return fail("gh login", fmt.Errorf("no account found in %s after login", id.GHConfigDir))
-		}
-		e.step(r, "gh logged in as %s", id.GHUser)
 	}
 	if p.Upload {
 		if err := e.uploadKey(p, id.GHConfigDir, "authentication"); err != nil {
@@ -130,34 +135,118 @@ func (e *Executor) generateKey(p Plan) error {
 	return e.interactive(exec.Command(e.Tools.SSHKeygen, args...))
 }
 
-func (e *Executor) ghLogin(p Plan, dir string) error {
+var (
+	deviceCode = regexp.MustCompile(`\b[A-Z0-9]{4}-[A-Z0-9]{4}\b`)
+	deviceURL  = regexp.MustCompile(`https://\S+`)
+)
+
+func (e *Executor) LoginDir(name string) string {
+	return filepath.Join(e.ConfigDir, "gh", name)
+}
+
+func (e *Executor) Login(name string) (Account, string, error) {
+	if e.Tools.GH == "" {
+		return Account{}, "", fmt.Errorf("gh is not installed (https://cli.github.com)")
+	}
+	dir := e.LoginDir(name)
+	e.Logout(dir, importer.GHUserFromConfigDir(dir))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+		return Account{}, "", err
 	}
 	scratch, err := os.MkdirTemp("", "git-idm-login-")
 	if err != nil {
-		return err
+		return Account{}, "", err
 	}
 	defer os.RemoveAll(scratch)
-	protocol := "https"
-	if p.SSH != SSHNone {
-		protocol = "ssh"
+	cmd := exec.Command(e.Tools.GH, "auth", "login", "--hostname", "github.com", "--web", "--clipboard",
+		"--skip-ssh-key", "--git-protocol", "https", "--scopes", "admin:public_key,admin:ssh_signing_key")
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir, "GIT_CONFIG_GLOBAL="+filepath.Join(scratch, "gitconfig"))
+	cmd.Stdin = strings.NewReader("")
+	pipe, err := cmd.StderrPipe()
+	if err != nil {
+		return Account{}, "", err
 	}
-	args := []string{"auth", "login", "--hostname", "github.com", "--git-protocol", protocol, "--web", "--skip-ssh-key"}
-	var scopes []string
-	if p.Upload {
-		scopes = append(scopes, "admin:public_key")
-		if p.Sign {
-			scopes = append(scopes, "admin:ssh_signing_key")
+	cmd.Stdout = cmd.Stderr
+	if err := cmd.Start(); err != nil {
+		return Account{}, "", err
+	}
+	var transcript strings.Builder
+	code, opened := "", false
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		transcript.WriteString(line + "\n")
+		if code == "" {
+			if m := deviceCode.FindString(line); m != "" {
+				code = m
+				copied := ""
+				if strings.Contains(line, "clipboard") {
+					copied = " (copied to the clipboard)"
+				}
+				fmt.Fprintf(e.Out, "\n  Your one-time code: %s%s\n", code, copied)
+			}
+		}
+		if url := deviceURL.FindString(line); url != "" && !opened {
+			opened = true
+			e.openBrowser(url)
 		}
 	}
-	if len(scopes) > 0 {
-		args = append(args, "--scopes", strings.Join(scopes, ","))
+	if err := cmd.Wait(); err != nil {
+		os.RemoveAll(dir)
+		return Account{}, "", fmt.Errorf("%v: %s", err, strings.TrimSpace(transcript.String()))
 	}
+	account, err := e.account(dir)
+	if err != nil {
+		e.Logout(dir, importer.GHUserFromConfigDir(dir))
+		return Account{}, "", err
+	}
+	fmt.Fprintf(e.Out, "  ✓ logged in as %s\n\n", account.Login)
+	return account, config.ContractHome(dir), nil
+}
+
+func (e *Executor) openBrowser(url string) {
+	if e.Tools.Open == "" || exec.Command(e.Tools.Open, url).Run() != nil {
+		fmt.Fprintf(e.Out, "  Open %s in your browser and enter the code.\n", url)
+		return
+	}
+	fmt.Fprintf(e.Out, "  Your browser opened %s. Paste the code there and log in with the account for this identity.\n", url)
+}
+
+func (e *Executor) account(dir string) (Account, error) {
+	cmd := exec.Command(e.Tools.GH, "api", "user")
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return Account{}, fmt.Errorf("read GitHub account: %v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	var a Account
+	if err := json.Unmarshal(out, &a); err != nil || a.Login == "" {
+		return Account{}, fmt.Errorf("read GitHub account: unexpected answer from gh api user")
+	}
+	return a, nil
+}
+
+func (e *Executor) Logout(dir, user string) {
+	dir = config.ExpandHome(dir)
+	if user != "" && e.Tools.GH != "" {
+		cmd := exec.Command(e.Tools.GH, "auth", "logout", "--hostname", "github.com", "--user", user)
+		cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir)
+		_ = cmd.Run()
+	}
+	os.RemoveAll(dir)
+}
+
+func (e *Executor) gh(dir string, args ...string) error {
 	cmd := exec.Command(e.Tools.GH, args...)
-	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir, "GIT_CONFIG_GLOBAL="+filepath.Join(scratch, "gitconfig"))
-	fmt.Fprintf(e.Out, "\n  gh opens your browser. Log in with the GitHub account for %s.\n\n", p.Name)
-	return e.interactive(cmd)
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+config.ExpandHome(dir))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 func (e *Executor) uploadKey(p Plan, ghDir, keyType string) error {

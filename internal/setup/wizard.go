@@ -19,19 +19,31 @@ const (
 	SSHExisting SSHMode = "existing"
 )
 
+type Account struct {
+	Login string `json:"login"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	ID    int64  `json:"id"`
+}
+
+func (a Account) NoReplyEmail() string {
+	return fmt.Sprintf("%d+%s@users.noreply.github.com", a.ID, a.Login)
+}
+
 type Plan struct {
-	Name       string
-	AuthorName string
-	Email      string
-	Color      string
-	GHLogin    bool
-	SSH        SSHMode
-	SSHKey     string
-	Passphrase bool
-	Upload     bool
-	Sign       bool
-	BindDir    string
-	CreateDir  bool
+	Name        string
+	AuthorName  string
+	Email       string
+	Color       string
+	GHUser      string
+	GHConfigDir string
+	SSH         SSHMode
+	SSHKey      string
+	Passphrase  bool
+	Upload      bool
+	Sign        bool
+	BindDir     string
+	CreateDir   bool
 }
 
 type Wizard struct {
@@ -39,29 +51,42 @@ type Wizard struct {
 	Config      *config.Config
 	DefaultName string
 	DefaultUser string
+	Login       func(name string) (Account, string, error)
+	Logout      func(dir, user string)
 }
 
 var colorChoices = []string{"cyan", "green", "magenta", "yellow", "blue", "red", "white"}
 
 func (w *Wizard) Run() (Plan, error) {
+	p, err := w.run()
+	if err != nil && p.GHUser != "" && w.Logout != nil {
+		w.Logout(p.GHConfigDir, p.GHUser)
+	}
+	return p, err
+}
+
+func (w *Wizard) run() (Plan, error) {
 	var p Plan
 	var err error
 	if p.Name, err = w.askName(); err != nil {
 		return p, err
 	}
-	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", w.DefaultUser, required("author name")); err != nil {
-		return p, err
-	}
-	if p.Email, err = w.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", "", w.validateEmail); err != nil {
-		return p, err
-	}
-	gh, err := w.Prompt.Select("GitHub account",
-		"git-idm keeps this login separate from your other gh accounts.",
-		[]Choice{{"login", "Log in now (opens the browser)"}, {"skip", "Skip"}}, "login")
+	account, err := w.askGitHub(&p)
 	if err != nil {
 		return p, err
 	}
-	p.GHLogin = gh == "login"
+	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", firstNonEmpty(account.Name, w.DefaultUser), required("author name")); err != nil {
+		return p, err
+	}
+	emailHelp := "The email on your commits. GitHub uses it to link commits to your account."
+	emailDefault := ""
+	if account.Login != "" {
+		emailDefault = firstNonEmpty(account.Email, account.NoReplyEmail())
+		emailHelp += "\n" + account.NoReplyEmail() + " keeps your real email private."
+	}
+	if p.Email, err = w.Prompt.Input("Email", emailHelp, emailDefault, w.validateEmail); err != nil {
+		return p, err
+	}
 	if err := w.askSSH(&p); err != nil {
 		return p, err
 	}
@@ -74,7 +99,7 @@ func (w *Wizard) Run() (Plan, error) {
 	if err := w.Prompt.Note("Summary", p.Summary()); err != nil {
 		return p, err
 	}
-	ok, err := w.Prompt.Confirm("Create this identity?", "Nothing is changed before you confirm.", true)
+	ok, err := w.Prompt.Confirm("Create this identity?", "Nothing else is changed before you confirm.", true)
 	if err != nil {
 		return p, err
 	}
@@ -82,6 +107,26 @@ func (w *Wizard) Run() (Plan, error) {
 		return p, ErrAborted
 	}
 	return p, nil
+}
+
+func (w *Wizard) askGitHub(p *Plan) (Account, error) {
+	if w.Login == nil {
+		return Account{}, nil
+	}
+	description := "Your browser opens now. git-idm keeps this login separate from your other gh accounts."
+	for {
+		pick, err := w.Prompt.Select("GitHub account", description,
+			[]Choice{{"login", "Log in now (opens the browser)"}, {"skip", "Skip"}}, "login")
+		if err != nil || pick == "skip" {
+			return Account{}, err
+		}
+		account, dir, err := w.Login(p.Name)
+		if err == nil {
+			p.GHUser, p.GHConfigDir = account.Login, dir
+			return account, nil
+		}
+		description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."
+	}
 }
 
 func (w *Wizard) askName() (string, error) {
@@ -142,8 +187,8 @@ func (w *Wizard) askSSH(p *Plan) error {
 	default:
 		p.SSH, p.SSHKey = SSHExisting, pick
 	}
-	if p.GHLogin {
-		if p.Upload, err = w.Prompt.Confirm("Add the key to your GitHub account?", "", true); err != nil {
+	if p.GHUser != "" {
+		if p.Upload, err = w.Prompt.Confirm("Add the key to "+p.GHUser+" on GitHub?", "", true); err != nil {
 			return err
 		}
 	}
@@ -220,8 +265,8 @@ func (w *Wizard) unusedColor() string {
 func (p Plan) Summary() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s  %s <%s>\n", p.Name, p.AuthorName, p.Email)
-	if p.GHLogin {
-		fmt.Fprintf(&b, "gh     log in, kept in its own folder\n")
+	if p.GHUser != "" {
+		fmt.Fprintf(&b, "gh     logged in as %s\n", p.GHUser)
 	} else {
 		fmt.Fprintf(&b, "gh     not set up\n")
 	}
@@ -279,6 +324,15 @@ func existingKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func required(what string) func(string) error {

@@ -49,6 +49,15 @@ func (p HuhPrompter) Input(title, description, value string, validate func(strin
 	if validate == nil {
 		validate = func(string) error { return nil }
 	}
+	if p.Accessible && value != "" {
+		inner, fallback := validate, value
+		validate = func(s string) error {
+			if s == "" {
+				return inner(fallback)
+			}
+			return inner(s)
+		}
+	}
 	err := p.run(huh.NewInput().Title(title).Description(description).Value(&value).Validate(validate))
 	return value, err
 }

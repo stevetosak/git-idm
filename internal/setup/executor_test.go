@@ -7,14 +7,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stevetosak/git-idm/internal/config"
 )
 
 const fakeGH = `#!/bin/sh
-echo "$* | GH_CONFIG_DIR=$GH_CONFIG_DIR | GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL" >> "$FAKE_LOG"
+stdin=tty; [ -t 0 ] || stdin=notty
+echo "$* | GH_CONFIG_DIR=$GH_CONFIG_DIR | GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL | stdin=$stdin" >> "$FAKE_LOG"
 case "$1 $2" in
   "auth login")
-    [ -n "$FAKE_LOGIN_FAIL" ] && exit 1
+    [ -n "$FAKE_LOGIN_FAIL" ] && { echo "authentication failed" >&2; exit 1; }
+    echo "! One-time code (ABCD-1234) copied to clipboard" >&2
+    echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
     printf 'github.com:\n    user: fake-user\n' > "$GH_CONFIG_DIR/hosts.yml"
+    ;;
+  "api user")
+    echo '{"login":"fake-user","name":"Fake User","email":null,"id":7}'
+    ;;
+  "auth logout")
+    rm -f "$GH_CONFIG_DIR/hosts.yml"
     ;;
   "ssh-key add")
     case "$*" in *signing*) [ -n "$FAKE_DUPLICATE" ] && { echo "key is already in use" >&2; exit 1; } ;; esac
@@ -33,13 +44,74 @@ func fakeTools(t *testing.T, home string) (Tools, string) {
 	os.MkdirAll(bin, 0o755)
 	os.WriteFile(filepath.Join(bin, "gh"), []byte(fakeGH), 0o755)
 	os.WriteFile(filepath.Join(bin, "ssh"), []byte(fakeSSH), 0o755)
+	os.WriteFile(filepath.Join(bin, "open"), []byte("#!/bin/sh\necho \"$1\" >> \"$FAKE_LOG.open\"\n"), 0o755)
 	keygen, err := exec.LookPath("ssh-keygen")
 	if err != nil {
 		t.Skip("ssh-keygen not installed")
 	}
 	log := filepath.Join(home, "gh.log")
 	t.Setenv("FAKE_LOG", log)
-	return Tools{GH: filepath.Join(bin, "gh"), SSHKeygen: keygen, SSH: filepath.Join(bin, "ssh")}, log
+	return Tools{GH: filepath.Join(bin, "gh"), SSHKeygen: keygen, SSH: filepath.Join(bin, "ssh"), Open: filepath.Join(bin, "open")}, log
+}
+
+func TestExecutorLogin(t *testing.T) {
+	home := sandbox(t)
+	tools, log := fakeTools(t, home)
+	var out bytes.Buffer
+	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &out}
+	account, dir, err := ex.Login("client")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if account.Login != "fake-user" || account.Name != "Fake User" || account.NoReplyEmail() != "7+fake-user@users.noreply.github.com" {
+		t.Fatalf("account = %+v", account)
+	}
+	if dir != "~/.config/git-idm/gh/client" {
+		t.Fatalf("dir = %s", dir)
+	}
+	calls, _ := os.ReadFile(log)
+	login := strings.Split(string(calls), "\n")[0]
+	for _, want := range []string{"auth login", "--web", "--clipboard", "--skip-ssh-key", "--scopes admin:public_key,admin:ssh_signing_key",
+		"GH_CONFIG_DIR=" + filepath.Join(home, ".config", "git-idm", "gh", "client"), "stdin=notty"} {
+		if !strings.Contains(login, want) {
+			t.Errorf("login call misses %q: %s", want, login)
+		}
+	}
+	if strings.Contains(login, "GIT_CONFIG_GLOBAL= ") || strings.Contains(login, "GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig")) {
+		t.Errorf("gh login must not see the real global gitconfig: %s", login)
+	}
+	opened, _ := os.ReadFile(log + ".open")
+	if strings.TrimSpace(string(opened)) != "https://github.com/login/device" {
+		t.Fatalf("browser opened %q", opened)
+	}
+	for _, want := range []string{"Your one-time code: ABCD-1234 (copied to the clipboard)", "Your browser opened", "✓ logged in as fake-user"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output misses %q:\n%s", want, out.String())
+		}
+	}
+
+	ex.Logout(dir, account.Login)
+	if _, err := os.Stat(config.ExpandHome(dir)); !os.IsNotExist(err) {
+		t.Fatal("logout must remove the login folder")
+	}
+	calls, _ = os.ReadFile(log)
+	if !strings.Contains(string(calls), "auth logout --hostname github.com --user fake-user") {
+		t.Fatalf("no logout call:\n%s", calls)
+	}
+}
+
+func TestExecutorLoginFailureCleansUp(t *testing.T) {
+	home := sandbox(t)
+	tools, _ := fakeTools(t, home)
+	t.Setenv("FAKE_LOGIN_FAIL", "1")
+	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &bytes.Buffer{}}
+	_, _, err := ex.Login("c")
+	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(ex.LoginDir("c")); !os.IsNotExist(err) {
+		t.Fatal("failed login must not leave a folder")
+	}
 }
 
 func TestExecutorFullPlan(t *testing.T) {
@@ -50,8 +122,8 @@ func TestExecutorFullPlan(t *testing.T) {
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Hostname: "mac", Out: &out}
 	p := Plan{
 		Name: "client", AuthorName: "Jane", Email: "jane@client.example", Color: "green",
-		GHLogin: true, SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client", Upload: true, Sign: true,
-		BindDir: "~/Clients/", CreateDir: true,
+		GHUser: "fake-user", GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
+		Upload: true, Sign: true, BindDir: "~/Clients/", CreateDir: true,
 	}
 	id, report, err := ex.Run(p)
 	if err != nil {
@@ -74,7 +146,7 @@ func TestExecutorFullPlan(t *testing.T) {
 		id.SigningKey != "~/.ssh/git-idm_client.pub" || id.Protocol != "ssh" || id.Email != "jane@client.example" {
 		t.Fatalf("identity = %+v", id)
 	}
-	if len(report.Done) != 5 {
+	if len(report.Done) != 4 {
 		t.Fatalf("report = %+v", report.Done)
 	}
 
@@ -83,15 +155,8 @@ func TestExecutorFullPlan(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("gh calls:\n%s", calls)
 	}
-	ghDir := filepath.Join(home, ".config", "git-idm", "gh", "client")
-	login := lines[0]
-	for _, want := range []string{"auth login", "--git-protocol ssh", "--web", "--skip-ssh-key", "--scopes admin:public_key,admin:ssh_signing_key", "GH_CONFIG_DIR=" + ghDir} {
-		if !strings.Contains(login, want) {
-			t.Errorf("login call misses %q: %s", want, login)
-		}
-	}
-	if strings.Contains(login, "GIT_CONFIG_GLOBAL= ") || strings.Contains(login, "GIT_CONFIG_GLOBAL="+filepath.Join(home, ".gitconfig")) {
-		t.Errorf("gh login must not see the real global gitconfig: %s", login)
+	if !strings.Contains(lines[0], "config set --host github.com git_protocol ssh") {
+		t.Errorf("protocol call: %s", lines[0])
 	}
 	if !strings.Contains(lines[1], "--type authentication") || !strings.Contains(lines[1], "--title git-idm client (mac)") {
 		t.Errorf("upload call: %s", lines[1])
@@ -100,21 +165,21 @@ func TestExecutorFullPlan(t *testing.T) {
 		t.Errorf("signing upload call: %s", lines[2])
 	}
 
-	login2, err := ex.TestConnection(id)
-	if err != nil || login2 != "fake-user" {
-		t.Fatalf("connection test: %q %v", login2, err)
+	login, err := ex.TestConnection(id)
+	if err != nil || login != "fake-user" {
+		t.Fatalf("connection test: %q %v", login, err)
 	}
 }
 
 func TestExecutorStopsAndReportsOnFailure(t *testing.T) {
 	home := sandbox(t)
 	tools, _ := fakeTools(t, home)
-	t.Setenv("FAKE_LOGIN_FAIL", "1")
 	var out bytes.Buffer
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &out}
-	p := Plan{Name: "c", AuthorName: "J", Email: "j@c.example", GHLogin: true, SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_c", BindDir: "~/C/", CreateDir: true}
+	p := Plan{Name: "c", AuthorName: "J", Email: "j@c.example", GHUser: "u", GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_c", BindDir: "~/C/", CreateDir: true}
+	ex.Tools.GH = filepath.Join(home, "missing-gh")
 	_, report, err := ex.Run(p)
-	if err == nil || report.Failed != "gh login" {
+	if err == nil || report.Failed != "set gh git protocol" {
 		t.Fatalf("err=%v report=%+v", err, report)
 	}
 	if len(report.Done) != 1 || !strings.Contains(report.Done[0], "git-idm_c") {
@@ -127,7 +192,7 @@ func TestExecutorStopsAndReportsOnFailure(t *testing.T) {
 
 func TestExecutorCheckMissingTools(t *testing.T) {
 	ex := &Executor{}
-	if err := ex.Check(Plan{GHLogin: true}); err == nil || !strings.Contains(err.Error(), "gh is not installed") {
+	if err := ex.Check(Plan{Upload: true}); err == nil || !strings.Contains(err.Error(), "gh is not installed") {
 		t.Fatalf("err = %v", err)
 	}
 	if err := ex.Check(Plan{SSH: SSHGenerate}); err == nil {
