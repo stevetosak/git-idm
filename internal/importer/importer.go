@@ -71,7 +71,7 @@ func (r *Result) importDefault(global gitConfig, name string) error {
 	}
 	id := identityFrom(global, global)
 	id.GHConfigDir = defaultGHConfigDir()
-	id.GHUser = ghUserFromConfigDir(id.GHConfigDir)
+	id.GHUser = GHUserFromConfigDir(id.GHConfigDir)
 	r.Config.Identities[name] = id
 	r.Config.Default = name
 	r.Findings = append(r.Findings, describe(name, id, "~/.gitconfig", sshSource(global), "default gh config"))
@@ -111,7 +111,7 @@ func (r *Result) importInclude(global gitConfig, inc include) {
 	envrc := filepath.Join(config.ExpandHome(rule.Path), ".envrc")
 	if dir := ghConfigDirFromEnvrc(envrc); dir != "" {
 		id.GHConfigDir = dir
-		id.GHUser = ghUserFromConfigDir(dir)
+		id.GHUser = GHUserFromConfigDir(dir)
 		ghSource = config.ContractHome(envrc)
 		r.Legacy = append(r.Legacy, envrcLegacy(envrc, rule.Path))
 	}
