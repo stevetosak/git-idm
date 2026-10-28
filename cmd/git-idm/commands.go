@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/ui"
+	"github.com/stevetosak/git-idm/internal/version"
 )
 
 const quickStart = `git-idm keeps one git identity per folder: commit author, SSH key and gh account.
@@ -25,7 +26,7 @@ var commandGroups = []struct {
 	{"essentials", "Essentials:", []string{"add", "edit", "rm", "ls", "help"}},
 	{"switching", "Switch identity:", []string{"use", "bind", "unbind"}},
 	{"safety", "Check and protect:", []string{"doctor", "login", "guard", "allow"}},
-	{"setup", "Setup:", []string{"init", "migrate", "apply", "hook", "prompt", "completion"}},
+	{"setup", "Setup:", []string{"init", "migrate", "apply", "hook", "prompt", "completion", "version"}},
 }
 
 func newRootCmd() *cobra.Command {
@@ -49,9 +50,11 @@ func newRootCmd() *cobra.Command {
 		newUseCmd(), newBindCmd(), newUnbindCmd(),
 		newDoctorCmd(), newLoginCmd(), newGuardCmd(), newAllowCmd(),
 		newInitCmd(), newMigrateCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
-		newEnvCmd(), newCheckCommitCmd(),
+		newVersionCmd(), newEnvCmd(), newCheckCommitCmd(),
 	)
 	root.SuggestionsMinimumDistance = 2
+	root.Version = version.Current()
+	root.SetVersionTemplate("git-idm {{.Version}}\n")
 	group := map[string]string{}
 	for _, g := range commandGroups {
 		root.AddGroup(&cobra.Group{ID: g.id, Title: g.title})
