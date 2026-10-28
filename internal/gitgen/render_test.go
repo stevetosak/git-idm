@@ -48,15 +48,16 @@ func TestReplaceBlockBrokenMarkers(t *testing.T) {
 
 func TestRenderIdentityQuoting(t *testing.T) {
 	t.Setenv("HOME", "/h/u")
-	out := RenderIdentity(config.Identity{
+	out := RenderIdentity("jo", config.Identity{
 		Name: `Jo "JJ" \ Doe ; # x`, Email: "jo@x.example",
 		SSHKey: "~/.ssh/it's key", Protocol: config.ProtocolSSH, GHConfigDir: "~/.config/gh-p",
-	})
+	}, "/opt/my bin/git-idm")
 	for _, want := range []string{
 		`name = "Jo \"JJ\" \\ Doe ; # x"`,
 		`sshCommand = "ssh -i '/h/u/.ssh/it'\\''s key' -o IdentitiesOnly=yes"`,
 		"[url \"git@github.com:\"]\n\tinsteadOf = \"https://github.com/\"",
 		"[credential \"https://github.com\"]\n\thelper = \"\"\n\thelper = \"!GH_CONFIG_DIR='/h/u/.config/gh-p' ",
+		"\thelper = \"!test -x '/opt/my bin/git-idm' || exit 0; '/opt/my bin/git-idm' credential-hint 'jo'\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s\nin:\n%s", want, out)

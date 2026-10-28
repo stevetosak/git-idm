@@ -35,14 +35,22 @@ func NewApplier() (*Applier, error) {
 	if err != nil {
 		return nil, err
 	}
-	bin, err := os.Executable()
+	bin, err := Executable()
 	if err != nil {
 		return nil, err
+	}
+	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, Now: time.Now}, nil
+}
+
+func Executable() (string, error) {
+	bin, err := os.Executable()
+	if err != nil {
+		return "", err
 	}
 	if real, err := filepath.EvalSymlinks(bin); err == nil {
 		bin = real
 	}
-	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, Now: time.Now}, nil
+	return bin, nil
 }
 
 func GlobalConfigPath() (string, error) {
@@ -73,7 +81,7 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 		return nil, err
 	}
 	for _, name := range c.Names() {
-		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(c.Identities[name]), false)
+		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(name, c.Identities[name], a.Bin), false)
 		if err != nil {
 			return changes, err
 		}
