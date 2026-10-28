@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,25 +11,104 @@ import (
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/guard"
 	"github.com/stevetosak/git-idm/internal/resolve"
+	"github.com/stevetosak/git-idm/internal/shell"
+	"github.com/stevetosak/git-idm/internal/ui"
 )
 
-var ansi = map[string]string{
-	"red": "31", "green": "32", "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36", "white": "37",
-}
-
 func runStatus(cmd *cobra.Command, args []string) error {
+	out := cmd.OutOrStdout()
+	t := ui.New(out)
+	c, err := config.Load()
+	if errors.Is(err, config.ErrNotFound) || (err == nil && len(c.Identities) == 0) {
+		fmt.Fprintln(out, welcome(t))
+		return nil
+	}
 	c, res, err := current()
 	if err != nil {
 		return err
 	}
-	printStatus(cmd.OutOrStdout(), c, res, colorEnabled(cmd.OutOrStdout()))
+	fmt.Fprintln(out, statusView(t, c, res))
 	return nil
+}
+
+func welcome(t *ui.Theme) string {
+	return t.Bold("No identities yet.") + "\n\n" + ui.Rows(t, [][2]string{
+		{"git-idm add", "create an identity (asks a few questions)"},
+		{"git-idm init", "import your current git, SSH and gh setup"},
+		{"git-idm help", "all commands"},
+	})
+}
+
+func statusView(t *ui.Theme, c *config.Config, res resolve.Result) string {
+	var b strings.Builder
+	if res.Identity == "" {
+		body := t.Bold("○ no identity here") + "\n\n" + ui.Rows(t, [][2]string{
+			{"why", "no rule matches and there is no default"},
+			{"fix", "git-idm bind <identity> .  or  git-idm edit <identity> --default"},
+		})
+		if res.RepoRoot != "" {
+			body += "\n" + ui.Rows(t, [][2]string{{"repo", config.ContractHome(res.RepoRoot)}})
+		}
+		b.WriteString(t.Card(body, "white") + "\n" + t.Footer())
+		return b.String()
+	}
+	id := c.Identities[res.Identity]
+	border := id.Color
+	header := t.Colored("●", id.Color) + " " + t.Identity(res.Identity, id.Color)
+	if res.Source == resolve.SourceOverride {
+		border = "red"
+		header = t.Alert("● "+res.Identity) + "  " + t.Alert("override")
+	}
+	rows := [][2]string{{"why", whyText(t, res)}}
+	if res.RepoRoot != "" {
+		rows = append(rows, [2]string{"repo", config.ContractHome(res.RepoRoot)})
+	}
+	if id.SSHKey != "" {
+		rows = append(rows, [2]string{"ssh", id.SSHKey})
+	}
+	if id.SigningKey != "" {
+		rows = append(rows, [2]string{"signs", id.SigningKey})
+	}
+	if id.GHConfigDir != "" {
+		gh := id.GHUser
+		if gh == "" {
+			gh = t.Warn("not logged in")
+		}
+		rows = append(rows, [2]string{"gh", gh})
+	}
+	body := header + "\n" + "  " + id.Name + " <" + id.Email + ">\n\n" + indent(ui.Rows(t, rows), "  ")
+	b.WriteString(t.Card(body, border))
+	for _, note := range notes(c, res) {
+		b.WriteString("\n  " + t.Warn("!") + " " + note)
+	}
+	b.WriteString("\n" + t.Footer())
+	return b.String()
+}
+
+func whyText(t *ui.Theme, res resolve.Result) string {
+	switch res.Source {
+	case resolve.SourceOverride:
+		s := "override in this shell"
+		if res.RuleIdentity != "" {
+			s += ", the rule says " + res.RuleIdentity
+		}
+		return s + "\n" + t.Dim("clear: git-idm use --clear")
+	case resolve.SourceRule:
+		return "rule " + res.Rule.Path
+	case resolve.SourceDefault:
+		return "★ default (no rule matches here)"
+	}
+	return "none"
+}
+
+func indent(s, prefix string) string {
+	return prefix + strings.ReplaceAll(s, "\n", "\n"+prefix)
 }
 
 func newPromptCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "prompt",
-		Short: "Print a short label for custom prompts",
+		Short: "Print the identity name for custom prompts",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, res, err := current()
@@ -42,46 +122,6 @@ func newPromptCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), label)
 			return nil
 		},
-	}
-}
-
-func printStatus(out io.Writer, c *config.Config, res resolve.Result, color bool) {
-	paint := func(code, s string) string {
-		if !color || code == "" {
-			return s
-		}
-		return "\x1b[" + code + "m" + s + "\x1b[0m"
-	}
-	if res.Identity == "" {
-		fmt.Fprintln(out, "no identity: no rule matches and no default is set")
-		return
-	}
-	id := c.Identities[res.Identity]
-	dot := ansi[id.Color]
-	if dot == "" {
-		dot = ansi["cyan"]
-	}
-	if res.Source == resolve.SourceOverride {
-		dot = "1;31"
-	}
-	fmt.Fprintf(out, "%s %s  %s <%s>\n", paint(dot, "●"), paint("1", res.Identity), id.Name, id.Email)
-	row := func(label, value string) { fmt.Fprintf(out, "  %-5s %s\n", label, value) }
-	row("why", reason(res))
-	if res.RepoRoot != "" {
-		row("repo", config.ContractHome(res.RepoRoot))
-	}
-	if id.SSHKey != "" {
-		row("ssh", id.SSHKey)
-	}
-	if id.GHConfigDir != "" {
-		gh := id.GHUser
-		if gh == "" {
-			gh = "not logged in"
-		}
-		row("gh", fmt.Sprintf("%s (%s)", gh, id.GHConfigDir))
-	}
-	for _, note := range notes(c, res) {
-		fmt.Fprintf(out, "  %s %s\n", paint("33", "note"), note)
 	}
 }
 
@@ -109,9 +149,9 @@ func notes(c *config.Config, res resolve.Result) []string {
 			user = res.LocalUser + " <" + res.LocalEmail + ">"
 		}
 		if strings.EqualFold(guard.Allowed(res.RepoRoot), res.LocalEmail) {
-			out = append(out, "this repo's .git/config sets the author to "+user+" (accepted with git-idm allow)")
+			out = append(out, "commits here use "+user+" from .git/config (accepted with git-idm allow)")
 		} else {
-			out = append(out, "this repo's .git/config sets the author to "+user+", commits here use it")
+			out = append(out, "commits here use "+user+" from .git/config, not "+res.Identity)
 		}
 	}
 	want := config.ExpandHome(c.Identities[res.Identity].GHConfigDir)
@@ -119,8 +159,11 @@ func notes(c *config.Config, res resolve.Result) []string {
 		if got == "" {
 			got = "(not set)"
 		}
-		out = append(out, fmt.Sprintf("gh in this shell uses GH_CONFIG_DIR=%s, expected %s; %s",
-			config.ContractHome(got), config.ContractHome(want), hookHint))
+		fix := "open a new shell"
+		if os.Getenv(shell.SegmentVar) == "" {
+			fix = "the shell hook is not active: " + hookHint
+		}
+		out = append(out, fmt.Sprintf("gh uses %s here, expected %s; %s", config.ContractHome(got), config.ContractHome(want), fix))
 	}
 	return out
 }

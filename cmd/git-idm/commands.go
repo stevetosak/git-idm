@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/ui"
 )
 
 func newRootCmd() *cobra.Command {
@@ -86,42 +87,74 @@ func newAddCmd() *cobra.Command {
 }
 
 func newLsCmd() *cobra.Command {
-	return &cobra.Command{
+	var long bool
+	cmd := &cobra.Command{
 		Use:   "ls",
-		Short: "List identities and their directories",
+		Short: "List identities and where they are used",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			t := ui.New(out)
 			c, err := config.Load()
+			if errors.Is(err, config.ErrNotFound) || (err == nil && len(c.Identities) == 0) {
+				fmt.Fprintln(out, welcome(t))
+				return nil
+			}
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), formatList(c))
+			active := ""
+			if _, res, err := current(); err == nil {
+				active = res.Identity
+			}
+			fmt.Fprintln(out, listView(t, c, active, long))
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&long, "long", "l", false, "also show SSH and signing keys")
+	return cmd
 }
 
-func formatList(c *config.Config) string {
-	var b strings.Builder
+func listView(t *ui.Theme, c *config.Config, active string, long bool) string {
+	header := []string{"", "IDENTITY", "AUTHOR", "GITHUB", "USED IN"}
+	if long {
+		header = append(header, "SSH KEY", "SIGNS WITH")
+	}
+	var rows [][]string
 	for _, name := range c.Names() {
 		id := c.Identities[name]
 		marker := " "
+		if name == active {
+			marker = t.Colored("●", id.Color)
+		}
+		var used []string
 		if name == c.Default {
-			marker = "*"
-		}
-		fmt.Fprintf(&b, "%s %-12s %s <%s>\n", marker, name, id.Name, id.Email)
-		if id.GHUser != "" {
-			fmt.Fprintf(&b, "    gh:   %s\n", id.GHUser)
-		}
-		if id.SSHKey != "" {
-			fmt.Fprintf(&b, "    ssh:  %s\n", id.SSHKey)
+			used = append(used, "★ default")
 		}
 		for _, r := range c.RulesFor(name) {
-			fmt.Fprintf(&b, "    dir:  %s\n", r.Path)
+			used = append(used, r.Path)
 		}
-		if name == c.Default {
-			fmt.Fprintf(&b, "    dir:  (default, when no rule matches)\n")
+		where := strings.Join(used, ", ")
+		if where == "" {
+			where = t.Dim("nowhere (git-idm bind " + name + " <dir>)")
 		}
+		gh := id.GHUser
+		if gh == "" {
+			gh = t.Dim("-")
+		}
+		row := []string{marker, t.Identity(name, id.Color), id.Name + " <" + id.Email + ">", gh, where}
+		if long {
+			row = append(row, orDash(t, id.SSHKey), orDash(t, id.SigningKey))
+		}
+		rows = append(rows, row)
 	}
-	return b.String()
+	legend := "● active here  ★ default for folders without a rule"
+	return ui.Table(t, header, rows) + "\n\n  " + t.Dim(legend) + "\n" + t.Footer()
+}
+
+func orDash(t *ui.Theme, s string) string {
+	if s == "" {
+		return t.Dim("-")
+	}
+	return s
 }
