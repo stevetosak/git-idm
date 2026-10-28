@@ -202,6 +202,9 @@ func TestInstallKeepsBinaryOnFailure(t *testing.T) {
 }
 
 func TestInstallWithoutWriteAccess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only folders")
+	}
 	exe := oldBinary(t)
 	dir := filepath.Dir(exe)
 	os.Chmod(dir, 0o555)
