@@ -219,8 +219,8 @@ func (w *Wizard) askSSH(p *Plan) error {
 	for _, key := range existingKeys() {
 		choices = append(choices, Choice{key, "Use " + key})
 	}
-	choices = append(choices, Choice{"none", "None (use your default SSH key)"})
-	pick, err := w.Prompt.Select("SSH key", "A separate key makes sure pushes use this account.", choices, "")
+	choices = append(choices, Choice{"none", "No SSH key, use " + p.httpsText()})
+	pick, err := w.Prompt.Select("SSH key", "A separate key makes sure SSH pushes use this account. Without a key, use HTTPS remote URLs.", choices, "")
 	if err != nil {
 		return err
 	}
@@ -472,7 +472,7 @@ func (p Plan) Summary() string {
 	case SSHExisting:
 		fmt.Fprintf(&b, "ssh    %s\n", p.SSHKey)
 	default:
-		fmt.Fprintf(&b, "ssh    default key\n")
+		fmt.Fprintf(&b, "ssh    no key, %s\n", p.httpsText())
 	}
 	switch {
 	case p.Upload:
@@ -549,4 +549,11 @@ func (p Plan) ghText() string {
 
 func (p Plan) KeyNotAdded() bool {
 	return p.NoKeyScope && p.SSH != SSHNone
+}
+
+func (p Plan) httpsText() string {
+	if p.GHUser != "" {
+		return "HTTPS with the gh login " + p.GHUser
+	}
+	return "HTTPS with your saved git credentials"
 }

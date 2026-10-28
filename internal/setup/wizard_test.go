@@ -418,3 +418,25 @@ func TestWizardDirectoryAnswers(t *testing.T) {
 		}
 	}
 }
+
+func TestNoSSHKeyMeansHTTPS(t *testing.T) {
+	for _, tc := range []struct{ ghUser, want string }{
+		{"jx", "HTTPS with the gh login jx"},
+		{"", "HTTPS with your saved git credentials"},
+	} {
+		sandbox(t)
+		f := &fakePrompter{t: t, answers: map[string][]string{"SSH key": {"none"}}}
+		w := &Wizard{Prompt: f, Config: existing()}
+		p := Plan{Name: "x", GHUser: tc.ghUser}
+		if err := w.askSSH(&p); err != nil {
+			t.Fatal(err)
+		}
+		choices := f.choices["SSH key"]
+		if label := choices[len(choices)-1].Label; label != "No SSH key, use "+tc.want {
+			t.Errorf("label = %q", label)
+		}
+		if summary := p.Summary(); !strings.Contains(summary, "ssh    no key, "+tc.want) {
+			t.Errorf("summary:\n%s", summary)
+		}
+	}
+}
