@@ -197,7 +197,7 @@ func notes(c *config.Config, res resolve.Result) []string {
 		}
 		fix := "open a new shell"
 		if os.Getenv(shell.SegmentVar) == "" {
-			fix = "the shell hook is not active: " + hookHint
+			fix = "the shell hook is not active: " + hookHint()
 		}
 		out = append(out, fmt.Sprintf("gh uses %s here, expected %s; %s", config.ContractHome(got), config.ContractHome(want), fix))
 	}
