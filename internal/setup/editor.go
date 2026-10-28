@@ -10,88 +10,181 @@ import (
 type Editor struct {
 	Prompt Prompter
 	Config *config.Config
+	Login  func(name string) (Account, string, error)
+	Logout func(dir, user string)
+	Logins []GHLogin
+	Verify func(dir string) (Account, error)
+
+	scopeChecked bool
 }
 
 type Edit struct {
-	Identity config.Identity
-	Default  bool
-	Changed  []string
+	Plan    Plan
+	Changed []string
+}
+
+func PlanFor(c *config.Config, name string) Plan {
+	id := c.Identities[name]
+	p := Plan{Name: name, AuthorName: id.Name, Email: id.Email, Color: colorOf(id),
+		GHUser: id.GHUser, GHConfigDir: id.GHConfigDir, SSH: SSHNone, MakeDefault: c.Default == name}
+	if id.SSHKey != "" {
+		p.SSH, p.SSHKey = SSHExisting, id.SSHKey
+	}
+	return p
 }
 
 func (e *Editor) Run(name string) (Edit, error) {
-	original, ok := e.Config.Identities[name]
-	if !ok {
+	if _, ok := e.Config.Identities[name]; !ok {
 		return Edit{}, fmt.Errorf("identity %q does not exist", name)
 	}
-	wasDefault := e.Config.Default == name
-	edit := Edit{Identity: original, Default: wasDefault}
+	edit := Edit{Plan: PlanFor(e.Config, name)}
+	err := e.run(&edit)
+	if err != nil {
+		if edit.Plan.NewLogin && e.Logout != nil {
+			e.Logout(edit.Plan.GHConfigDir, edit.Plan.GHUser)
+		}
+		return Edit{}, err
+	}
+	return edit, nil
+}
+
+func (e *Editor) run(edit *Edit) error {
+	original := edit.Plan
 	last := "name"
 	for {
-		edit.Changed = changedFields(original, wasDefault, edit)
-		pick, err := e.Prompt.Select("Edit "+name, editDescription(edit.Changed), e.menu(edit), last)
+		edit.Changed = changedFields(original, edit.Plan)
+		pick, err := e.Prompt.Select("Edit "+original.Name, editDescription(edit.Changed), e.menu(edit.Plan), last)
 		if err != nil {
-			return Edit{}, err
+			return err
 		}
 		last = pick
 		switch pick {
 		case "done":
-			return edit, nil
+			return nil
 		case "cancel":
-			return Edit{}, ErrAborted
+			return ErrAborted
 		}
-		if err := e.ask(name, pick, &edit); err != nil {
-			return Edit{}, err
+		if err := e.ask(pick, &edit.Plan); err != nil {
+			return err
 		}
 	}
 }
 
-func (e *Editor) ask(name, field string, edit *Edit) error {
-	id := &edit.Identity
+func (e *Editor) wizard() *Wizard {
+	return &Wizard{Prompt: e.Prompt, Config: e.Config, Login: e.Login, Logout: e.Logout, Logins: e.Logins, Verify: e.Verify}
+}
+
+func (e *Editor) ask(field string, p *Plan) error {
 	var err error
 	switch field {
 	case "name":
-		id.Name, err = e.Prompt.Input("Author name", "The name on your commits.", id.Name, required("author name"))
+		p.AuthorName, err = e.Prompt.Input("Author name", "The name on your commits.", p.AuthorName, required("author name"))
 	case "email":
-		id.Email, err = e.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", id.Email,
-			func(s string) error { return validateEmail(e.Config, name, s) })
+		p.Email, err = e.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", p.Email,
+			func(s string) error { return validateEmail(e.Config, p.Name, s) })
+	case "ssh":
+		e.checkScope(p)
+		err = e.wizard().askSSH(p)
+	case "github":
+		err = e.askGitHub(p)
 	case "color":
-		id.Color, err = e.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), colorOf(*id))
+		p.Color, err = e.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), p.Color)
 	case "default":
-		edit.Default, err = e.Prompt.Confirm("Use "+name+" as the default?", "The default applies in every folder without a rule.", edit.Default)
+		p.MakeDefault, err = e.Prompt.Confirm("Use "+p.Name+" as the default?", "The default applies in every folder without a rule.", p.MakeDefault)
 	}
 	return err
 }
 
-func (e *Editor) menu(edit Edit) []Choice {
-	id := edit.Identity
+func (e *Editor) checkScope(p *Plan) {
+	if e.scopeChecked || p.NewLogin || p.GHUser == "" || e.Verify == nil {
+		return
+	}
+	e.scopeChecked = true
+	account, err := e.Verify(p.GHConfigDir)
+	p.NoKeyScope = err != nil || !account.CanAddKeys()
+}
+
+func (e *Editor) askGitHub(p *Plan) error {
+	before := *p
+	var head, tail []Choice
+	if p.GHUser != "" {
+		head = []Choice{{"keep", "Keep " + ghLabel(*p)}}
+		tail = []Choice{{"remove", "No GitHub login"}}
+	} else {
+		tail = []Choice{{"keep", "Skip"}}
+	}
+	pick, err := e.wizard().chooseGitHub(p, head, tail, "keep", p.GHConfigDir)
+	if err != nil {
+		return err
+	}
+	if pick == "keep" {
+		return nil
+	}
+	if pick == "remove" {
+		p.GHUser, p.GHConfigDir, p.NoKeyScope, p.NewLogin = "", "", false, false
+	}
+	if before.NewLogin && before.GHConfigDir != p.GHConfigDir && e.Logout != nil {
+		e.Logout(before.GHConfigDir, before.GHUser)
+	}
+	e.scopeChecked = true
+	p.Upload = false
+	return nil
+}
+
+func (e *Editor) menu(p Plan) []Choice {
 	row := func(key, label, value string) Choice {
 		return Choice{key, fmt.Sprintf("%-12s %s", label, value)}
 	}
-	return []Choice{
-		row("name", "Author name", id.Name),
-		row("email", "Email", id.Email),
-		row("color", "Color", colorOf(id)),
-		row("default", "Default", yesNo(edit.Default)),
-		{"done", "Done"},
-		{"cancel", "Cancel"},
+	choices := []Choice{
+		row("name", "Author name", p.AuthorName),
+		row("email", "Email", p.Email),
+		row("ssh", "SSH key", sshLabel(p)),
 	}
+	if e.Login != nil {
+		choices = append(choices, row("github", "GitHub", ghLabel(p)))
+	}
+	return append(choices,
+		row("color", "Color", p.Color),
+		row("default", "Default", yesNo(p.MakeDefault)),
+		Choice{"done", "Done"},
+		Choice{"cancel", "Cancel"},
+	)
 }
 
-func changedFields(original config.Identity, wasDefault bool, edit Edit) []string {
+func sshLabel(p Plan) string {
+	label := p.SSHKey
+	switch p.SSH {
+	case SSHNone:
+		return "none, " + p.httpsText()
+	case SSHGenerate:
+		label = "new key " + p.SSHKey
+	}
+	if p.Upload {
+		label += ", add to GitHub"
+	}
+	return label
+}
+
+func ghLabel(p Plan) string {
+	if p.GHUser == "" {
+		return "none"
+	}
+	return p.GHUser + " (" + p.GHConfigDir + ")"
+}
+
+func changedFields(original, p Plan) []string {
 	var changed []string
-	id := edit.Identity
-	if id.Name != original.Name {
-		changed = append(changed, "author name")
+	add := func(differs bool, name string) {
+		if differs {
+			changed = append(changed, name)
+		}
 	}
-	if id.Email != original.Email {
-		changed = append(changed, "email")
-	}
-	if colorOf(id) != colorOf(original) {
-		changed = append(changed, "color")
-	}
-	if edit.Default != wasDefault {
-		changed = append(changed, "default")
-	}
+	add(p.AuthorName != original.AuthorName, "author name")
+	add(p.Email != original.Email, "email")
+	add(p.SSH != original.SSH || p.SSHKey != original.SSHKey || p.Upload, "ssh key")
+	add(p.GHConfigDir != original.GHConfigDir || p.GHUser != original.GHUser, "GitHub")
+	add(p.Color != original.Color, "color")
+	add(p.MakeDefault != original.MakeDefault, "default")
 	return changed
 }
 

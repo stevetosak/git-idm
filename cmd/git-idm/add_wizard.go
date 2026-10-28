@@ -90,12 +90,7 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 	if id.SSHKey != "" && !(plan.SSH == setup.SSHGenerate && plan.KeyNotAdded()) {
 		testConnection(out, ex, id)
 	}
-	if plan.KeyNotAdded() {
-		pub := id.SSHKey + ".pub"
-		fmt.Fprintf(out, "\nThe key is not on GitHub: the gh login %s cannot add keys. To add it:\n", plan.GHUser)
-		fmt.Fprintf(out, "  git-idm login %s\n", plan.Name)
-		fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh ssh-key add %s --title \"git-idm %s\"\n", id.GHConfigDir, pub, plan.Name)
-	}
+	printKeyHint(out, plan, id)
 	fmt.Fprintf(out, "\nDone.")
 	switch {
 	case plan.MakeDefault:
@@ -150,4 +145,13 @@ func defaultAuthor(c *config.Config) string {
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func printKeyHint(out io.Writer, plan setup.Plan, id config.Identity) {
+	if !plan.KeyNotAdded() {
+		return
+	}
+	fmt.Fprintf(out, "\nThe key is not on GitHub: the gh login %s cannot add keys. To add it:\n", plan.GHUser)
+	fmt.Fprintf(out, "  git-idm login %s\n", plan.Name)
+	fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh ssh-key add %s.pub --title \"git-idm %s\"\n", id.GHConfigDir, id.SSHKey, plan.Name)
 }

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/importer"
 	"github.com/stevetosak/git-idm/internal/setup"
 )
 
@@ -113,7 +115,17 @@ func runEditMenu(cmd *cobra.Command, c *config.Config, name string) error {
 	if err != nil {
 		return fmt.Errorf("give at least one field to change, see: git-idm edit --help")
 	}
-	edit, err := (&setup.Editor{Prompt: prompter, Config: c}).Run(name)
+	ex, err := newExecutor(cmd)
+	if err != nil {
+		return err
+	}
+	editor := setup.Editor{Prompt: prompter, Config: c, Logout: ex.Logout}
+	if ex.Tools.GH != "" {
+		editor.Login = func(string) (setup.Account, string, error) { return ex.Login(freeLoginName(ex, name)) }
+		editor.Verify = ex.Account
+		editor.Logins = setup.ExistingLogins(c, importer.DefaultGHConfigDir())
+	}
+	edit, err := editor.Run(name)
 	if errors.Is(err, setup.ErrAborted) {
 		fmt.Fprintln(out, "nothing was changed")
 		return nil
@@ -125,16 +137,62 @@ func runEditMenu(cmd *cobra.Command, c *config.Config, name string) error {
 		fmt.Fprintln(out, "nothing was changed")
 		return nil
 	}
-	c.Identities[name] = edit.Identity
+	plan := edit.Plan
+	undo := func(err error) error {
+		if plan.NewLogin {
+			ex.Logout(plan.GHConfigDir, plan.GHUser)
+		}
+		return err
+	}
+	if err := ex.Check(plan); err != nil {
+		return undo(err)
+	}
+	old := c.Identities[name]
+	id, report, err := ex.Run(plan)
+	if err != nil {
+		printPartial(out, report)
+		return undo(err)
+	}
+	id.SigningKey = old.SigningKey
+	c.Identities[name] = id
 	switch {
-	case edit.Default:
+	case plan.MakeDefault:
 		c.Default = name
 	case c.Default == name:
 		c.Default = ""
 	}
 	if err := c.Save(); err != nil {
-		return err
+		printPartial(out, report)
+		return undo(err)
 	}
 	fmt.Fprintf(out, "updated %s: %s\n", name, strings.Join(edit.Changed, ", "))
-	return applyConfig(out, c)
+	if err := applyConfig(out, c); err != nil {
+		return err
+	}
+	if old.GHConfigDir != "" && config.ExpandHome(old.GHConfigDir) != config.ExpandHome(id.GHConfigDir) &&
+		isManagedLogin(ex, old.GHConfigDir) && len(identitiesUsing(c, old.GHConfigDir)) == 0 {
+		ex.Logout(old.GHConfigDir, old.GHUser)
+		fmt.Fprintf(out, "  ✓ logged out of %s and deleted %s, no identity uses it now\n", old.GHUser, old.GHConfigDir)
+	}
+	if plan.Upload {
+		testConnection(out, ex, id)
+	}
+	printKeyHint(out, plan, id)
+	return nil
+}
+
+func freeLoginName(ex *setup.Executor, name string) string {
+	for i := 1; ; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s-%d", name, i)
+		}
+		if _, err := os.Stat(ex.LoginDir(candidate)); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
+func isManagedLogin(ex *setup.Executor, dir string) bool {
+	return filepath.Dir(config.ExpandHome(dir)) == filepath.Join(ex.ConfigDir, "gh")
 }

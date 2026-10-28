@@ -23,6 +23,7 @@ case "$1 $2" in
   "config get") if [ -f "$GH_CONFIG_DIR/protocol" ]; then cat "$GH_CONFIG_DIR/protocol"; fi ;;
   "config set") echo "$* in $GH_CONFIG_DIR" >> "$HOME/calls" ;;
   "auth logout") echo "$* in $GH_CONFIG_DIR" >> "$HOME/calls" ;;
+  "ssh-key add") echo "$* in $GH_CONFIG_DIR" >> "$HOME/calls" ;;
 esac
 `
 

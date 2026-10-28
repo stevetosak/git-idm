@@ -108,38 +108,50 @@ func (w *Wizard) AskGitHub(name string) (Plan, error) {
 }
 
 func (w *Wizard) askGitHub(p *Plan) error {
+	_, err := w.chooseGitHub(p, nil, []Choice{{"skip", "Skip"}}, "login", "")
+	return err
+}
+
+func (w *Wizard) chooseGitHub(p *Plan, head, tail []Choice, value, exclude string) (string, error) {
 	if w.Login == nil {
-		return nil
+		return "", nil
 	}
-	choices := []Choice{{"login", "Log in now (opens the browser)"}}
+	choices := append(append([]Choice{}, head...), Choice{"login", "Log in now (opens the browser)"})
 	description := "Your browser opens now. git-idm keeps this login separate from your other gh accounts."
-	if w.Verify != nil && len(w.Logins) > 0 {
+	if w.Verify != nil {
 		for _, l := range w.Logins {
+			if exclude != "" && config.ExpandHome(l.Dir) == config.ExpandHome(exclude) {
+				continue
+			}
 			choices = append(choices, Choice{"use:" + l.Dir, l.label()})
+			description = "Log in to a new account in the browser, or use a gh login that you already have."
 		}
-		description = "Log in to a new account in the browser, or use a gh login that you already have."
 	}
-	choices = append(choices, Choice{"skip", "Skip"})
+	choices = append(choices, tail...)
 	for {
-		pick, err := w.Prompt.Select("GitHub account", description, choices, "login")
-		if err != nil || pick == "skip" {
-			return err
+		pick, err := w.Prompt.Select("GitHub account", description, choices, value)
+		if err != nil {
+			return "", err
 		}
-		if dir, ok := strings.CutPrefix(pick, "use:"); ok {
+		dir, use := strings.CutPrefix(pick, "use:")
+		switch {
+		case use:
 			account, err := w.Verify(dir)
 			if err == nil {
-				p.GHUser, p.GHConfigDir, p.NoKeyScope = account.Login, dir, !account.CanAddKeys()
-				return nil
+				p.GHUser, p.GHConfigDir, p.NoKeyScope, p.NewLogin = account.Login, dir, !account.CanAddKeys(), false
+				return pick, nil
 			}
 			description = "The login in " + dir + " does not work: " + err.Error() + "\nLog in now, pick another login, or skip."
-			continue
+		case pick == "login":
+			account, dir, err := w.Login(p.Name)
+			if err == nil {
+				p.GHUser, p.GHConfigDir, p.NoKeyScope, p.NewLogin = account.Login, dir, false, true
+				return pick, nil
+			}
+			description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."
+		default:
+			return pick, nil
 		}
-		account, dir, err := w.Login(p.Name)
-		if err == nil {
-			p.GHUser, p.GHConfigDir, p.NewLogin = account.Login, dir, true
-			return nil
-		}
-		description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."
 	}
 }
 
@@ -222,13 +234,21 @@ func (w *Wizard) askSSH(p *Plan) error {
 		choices = append(choices, Choice{key, "Use " + key})
 	}
 	choices = append(choices, Choice{"none", "No SSH key, use " + p.httpsText()})
-	pick, err := w.Prompt.Select("SSH key", "A separate key makes sure SSH pushes use this account. Without a key, use HTTPS remote URLs.", choices, "")
+	current := ""
+	switch p.SSH {
+	case SSHExisting:
+		current = p.SSHKey
+	case SSHNone:
+		current = "none"
+	}
+	pick, err := w.Prompt.Select("SSH key", "A separate key makes sure SSH pushes use this account. Without a key, use HTTPS remote URLs.", choices, current)
 	if err != nil {
 		return err
 	}
+	p.Passphrase, p.Upload = false, false
 	switch pick {
 	case "none":
-		p.SSH = SSHNone
+		p.SSH, p.SSHKey = SSHNone, ""
 		return nil
 	case "generate":
 		p.SSH, p.SSHKey = SSHGenerate, generated
