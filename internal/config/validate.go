@@ -51,6 +51,11 @@ func (c *Config) Validate() error {
 		if seen[r.Path] {
 			return fmt.Errorf("rule %q: defined more than once", r.Path)
 		}
+		if r.Was != "" {
+			if _, ok := c.Identities[r.Was]; !ok || !r.Temporary || r.Was == r.Identity {
+				return fmt.Errorf("rule %q: was = %q must be another existing identity on a temporary rule", r.Path, r.Was)
+			}
+		}
 		seen[r.Path] = true
 	}
 	return nil

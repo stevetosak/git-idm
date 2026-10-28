@@ -179,6 +179,10 @@ func (p RemovePlan) Summary(c *config.Config) string {
 		}
 	}
 	for _, rule := range c.RulesFor(p.Name) {
+		if rule.Temporary && rule.Was != "" {
+			fmt.Fprintf(&b, "end the temporary binding of %s (repos there use %s again)\n", rule.Path, rule.Was)
+			continue
+		}
 		if fallback != "" && fallback != p.Name {
 			fmt.Fprintf(&b, "unbind %s (repos there then use %s)\n", rule.Path, fallback)
 		} else {

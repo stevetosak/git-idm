@@ -30,8 +30,10 @@ type Identity struct {
 }
 
 type Rule struct {
-	Path     string `toml:"path"`
-	Identity string `toml:"identity"`
+	Path      string `toml:"path"`
+	Identity  string `toml:"identity"`
+	Temporary bool   `toml:"temporary,omitempty"`
+	Was       string `toml:"was,omitempty"`
 }
 
 type GuardMode string

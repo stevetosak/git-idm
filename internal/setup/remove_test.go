@@ -145,3 +145,14 @@ func TestExecutorRemove(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveSummaryEndsTemporaryBinding(t *testing.T) {
+	c := config.New()
+	c.Identities["work"] = config.Identity{Name: "W", Email: "w@x.example"}
+	c.Identities["client"] = config.Identity{Name: "C", Email: "c@x.example"}
+	c.Rules = []config.Rule{{Path: "~/Work/", Identity: "client", Temporary: true, Was: "work"}}
+	s := RemovePlan{Name: "client"}.Summary(c)
+	if !strings.Contains(s, "end the temporary binding of ~/Work/ (repos there use work again)") || strings.Contains(s, "unbind") {
+		t.Fatalf("summary:\n%s", s)
+	}
+}

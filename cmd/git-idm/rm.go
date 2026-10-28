@@ -93,11 +93,5 @@ func removeFromConfig(c *config.Config, p setup.RemovePlan) {
 	if c.Default == p.Name {
 		c.Default = p.NewDefault
 	}
-	kept := c.Rules[:0]
-	for _, r := range c.Rules {
-		if r.Identity != p.Name {
-			kept = append(kept, r)
-		}
-	}
-	c.Rules = kept
+	c.RemoveRulesFor(p.Name)
 }

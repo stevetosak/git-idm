@@ -29,46 +29,50 @@ func newApplyCmd() *cobra.Command {
 }
 
 func newBindCmd() *cobra.Command {
-	return &cobra.Command{
+	var temporary bool
+	cmd := &cobra.Command{
 		Use:   "bind <identity> [dir]",
 		Short: "Use an identity for every repo in a folder",
-		Args:  cobra.RangeArgs(1, 2),
+		Example: "  git-idm bind work ~/Projects\n" +
+			"  git-idm bind client ~/Projects/acme --temp   end with: git-idm unbind ~/Projects/acme",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
 			if err != nil {
 				return err
 			}
-			name := args[0]
-			if _, ok := c.Identities[name]; !ok {
-				return fmt.Errorf("identity %q does not exist", name)
-			}
 			rulePath, err := rulePathFor(args[1:])
 			if err != nil {
 				return err
 			}
-			replaced := false
-			for i, r := range c.Rules {
-				if r.Path == rulePath {
-					c.Rules[i].Identity = name
-					replaced = true
-				}
-			}
-			if !replaced {
-				c.Rules = append(c.Rules, config.Rule{Path: rulePath, Identity: name})
+			rule, err := c.Bind(rulePath, args[0], temporary)
+			if err != nil {
+				return err
 			}
 			if err := c.Save(); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "bound %s to %s\n", rulePath, name)
-			return applyConfig(cmd.OutOrStdout(), c)
+			out := cmd.OutOrStdout()
+			switch {
+			case rule.Temporary && rule.Was != "":
+				fmt.Fprintf(out, "%s uses %s for now, instead of %s. End with: git-idm unbind %s\n", rulePath, rule.Identity, rule.Was, rulePath)
+			case rule.Temporary:
+				fmt.Fprintf(out, "%s uses %s for now. End with: git-idm unbind %s\n", rulePath, rule.Identity, rulePath)
+			default:
+				fmt.Fprintf(out, "bound %s to %s\n", rulePath, rule.Identity)
+			}
+			return applyConfig(out, c)
 		},
 	}
+	cmd.Flags().BoolVar(&temporary, "temp", false, "until you run git-idm unbind; then the folder uses its old identity again")
+	return cmd
 }
 
 func newUnbindCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unbind [dir]",
 		Short: "Stop using an identity in a folder",
+		Long:  "Stop using an identity in a folder. For a temporary binding, the folder uses its old identity again.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -79,21 +83,23 @@ func newUnbindCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			kept := c.Rules[:0]
-			for _, r := range c.Rules {
-				if r.Path != rulePath {
-					kept = append(kept, r)
-				}
+			old, err := c.Unbind(rulePath)
+			if err != nil {
+				return err
 			}
-			if len(kept) == len(c.Rules) {
-				return fmt.Errorf("no rule for %s", rulePath)
-			}
-			c.Rules = kept
 			if err := c.Save(); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "unbound %s\n", rulePath)
-			return applyConfig(cmd.OutOrStdout(), c)
+			out := cmd.OutOrStdout()
+			switch {
+			case old.Temporary && old.Was != "":
+				fmt.Fprintf(out, "ended the temporary binding: %s uses %s again\n", rulePath, old.Was)
+			case old.Temporary:
+				fmt.Fprintf(out, "ended the temporary binding of %s to %s\n", rulePath, old.Identity)
+			default:
+				fmt.Fprintf(out, "unbound %s\n", rulePath)
+			}
+			return applyConfig(out, c)
 		},
 	}
 }
