@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 )
 
@@ -16,6 +17,7 @@ type Choice struct {
 
 type Prompter interface {
 	Input(title, description, value string, validate func(string) error) (string, error)
+	PathInput(title, description string, validate func(string) error, complete func(string) []string, status func(string) string) (string, error)
 	Select(title, description string, choices []Choice, value string) (string, error)
 	Confirm(title, description string, value bool) (bool, error)
 	Note(title, body string) error
@@ -27,8 +29,15 @@ type HuhPrompter struct {
 	Accessible bool
 }
 
+func keyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	km.Input.Next = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "next"))
+	km.Input.AcceptSuggestion = key.NewBinding(key.WithKeys("tab", "ctrl+e"), key.WithHelp("tab", "complete"))
+	return km
+}
+
 func (p HuhPrompter) run(field huh.Field) error {
-	form := huh.NewForm(huh.NewGroup(field)).WithShowHelp(true)
+	form := huh.NewForm(huh.NewGroup(field)).WithShowHelp(true).WithKeyMap(keyMap())
 	if p.Accessible {
 		form = form.WithAccessible(true)
 	}
@@ -59,6 +68,20 @@ func (p HuhPrompter) Input(title, description, value string, validate func(strin
 		}
 	}
 	err := p.run(huh.NewInput().Title(title).Description(description).Value(&value).Validate(validate))
+	return value, err
+}
+
+func (p HuhPrompter) PathInput(title, description string, validate func(string) error, complete func(string) []string, status func(string) string) (string, error) {
+	var value string
+	field := huh.NewInput().Title(title).Validate(validate).Value(&value).
+		DescriptionFunc(func() string {
+			if line := status(value); line != "" {
+				return description + "\n" + line
+			}
+			return description
+		}, &value).
+		SuggestionsFunc(func() []string { return complete(value) }, &value)
+	err := p.run(field)
 	return value, err
 }
 

@@ -11,11 +11,12 @@ import (
 )
 
 type fakePrompter struct {
-	t       *testing.T
-	answers map[string][]string
-	asked   []string
-	errors  []string
-	choices map[string][]Choice
+	t        *testing.T
+	answers  map[string][]string
+	asked    []string
+	errors   []string
+	choices  map[string][]Choice
+	statuses map[string]string
 }
 
 func (f *fakePrompter) next(title string) string {
@@ -34,6 +35,22 @@ func (f *fakePrompter) Input(title, _, value string, validate func(string) error
 		if answer == "<default>" {
 			answer = value
 		}
+		if err := validate(answer); err != nil {
+			f.errors = append(f.errors, title+": "+err.Error())
+			continue
+		}
+		return answer, nil
+	}
+}
+
+func (f *fakePrompter) PathInput(title, _ string, validate func(string) error, complete func(string) []string, status func(string) string) (string, error) {
+	complete("")
+	for {
+		answer := f.next(title)
+		if f.statuses == nil {
+			f.statuses = map[string]string{}
+		}
+		f.statuses[answer] = status(answer)
 		if err := validate(answer); err != nil {
 			f.errors = append(f.errors, title+": "+err.Error())
 			continue
@@ -96,18 +113,17 @@ func existing() *config.Config {
 func TestWizardFullFlow(t *testing.T) {
 	home := sandbox(t)
 	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Author name":                           {"<default>"},
-		"Email":                                 {"nope", "jane@work.example", "jane@client.example"},
-		"Identity name":                         {"work", "Bad Name", "<default>"},
-		"GitHub account":                        {"login", "login"},
-		"SSH key":                               {"generate"},
-		"Key passphrase":                        {"no"},
-		"Add the key to jane-gh on GitHub?":     {"<default>"},
-		"Directory for client":                  {"type"},
-		"Directory path":                        {"relative/dir", "~/Work", "~/Clients"},
-		"~/Clients/ does not exist. Create it?": {"<default>"},
-		"Prompt color":                          {"<default>"},
-		"Create this identity?":                 {"<default>"},
+		"Author name":                       {"<default>"},
+		"Email":                             {"nope", "jane@work.example", "jane@client.example"},
+		"Identity name":                     {"work", "Bad Name", "<default>"},
+		"GitHub account":                    {"login", "login"},
+		"SSH key":                           {"generate"},
+		"Key passphrase":                    {"no"},
+		"Add the key to jane-gh on GitHub?": {"<default>"},
+		"Directory for client":              {"type"},
+		"Directory path":                    {"relative/dir", "~/Work", "~/Clients"},
+		"Prompt color":                      {"<default>"},
+		"Create this identity?":             {"<default>"},
 	}}
 	logins := 0
 	w := Wizard{Prompt: f, Config: existing(), DefaultUser: "Jane",
@@ -389,6 +405,80 @@ func TestWizardHomeMeansDefault(t *testing.T) {
 		}
 		if !strings.Contains(p.Summary(), "default for every folder without an identity") {
 			t.Errorf("summary: %s", p.Summary())
+		}
+	}
+}
+
+func TestWizardDirectoryInputsGoBack(t *testing.T) {
+	sandbox(t)
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Author name":           {"Jane"},
+		"Email":                 {"jane@b.example"},
+		"Directory for b":       {"type", "new", "skip"},
+		"Directory path":        {""},
+		"New folder in ~":       {""},
+		"SSH key":               {"none"},
+		"Prompt color":          {"<default>"},
+		"Create this identity?": {"yes"},
+	}}
+	p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "b"}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.BindDir != "" || p.MakeDefault {
+		t.Fatalf("plan = %+v", p)
+	}
+	browsed := 0
+	for _, q := range f.asked {
+		if q == "Directory for b" {
+			browsed++
+		}
+	}
+	if browsed != 3 {
+		t.Fatalf("an empty answer must return to the folder list, asked: %v", f.asked)
+	}
+}
+
+func TestCompleteDir(t *testing.T) {
+	home := sandbox(t)
+	for _, d := range []string{"Projects/x", "Personal", "private", ".hidden"} {
+		os.MkdirAll(filepath.Join(home, d), 0o700)
+	}
+	os.WriteFile(filepath.Join(home, "Pfile"), []byte("x"), 0o600)
+	cases := map[string]string{
+		"~/Pro":       "~/Projects/",
+		"~/p":         "~/Personal/,~/private/,~/Projects/",
+		"~/Projects/": "~/Projects/x/",
+		"~/.h":        "~/.hidden/",
+		"":            "~/Personal/,~/private/,~/Projects/",
+		home + "/Pe":  home + "/Personal/",
+		"relative":    "",
+		"~/missing/":  "",
+	}
+	for in, want := range cases {
+		if got := strings.Join(CompleteDir(in), ","); got != want {
+			t.Errorf("CompleteDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPathStatus(t *testing.T) {
+	home := sandbox(t)
+	for _, d := range []string{"Work", "Repos/a/.git", "Repos/b/.git"} {
+		os.MkdirAll(filepath.Join(home, d), 0o700)
+	}
+	os.WriteFile(filepath.Join(home, "file"), []byte("x"), 0o600)
+	w := &Wizard{Config: existing()}
+	for in, want := range map[string]string{
+		"~/Work":  "✗ ~/Work/ is already bound to \"work\"",
+		"~/Repos": "✓ exists · 2 repos",
+		"~/New":   "+ new folder, created after you confirm",
+		"~/file":  "✗ this is a file",
+		"~":       "★ your home folder: makes it the default, replaces work",
+		"rel":     "",
+	} {
+		if got := w.pathStatus(in); got != want {
+			t.Errorf("pathStatus(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

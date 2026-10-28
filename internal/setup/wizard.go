@@ -224,7 +224,8 @@ func (w *Wizard) askSSH(p *Plan) error {
 func (w *Wizard) askDir(p *Plan) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return w.typeDir(p)
+		_, err := w.typeDir(p)
+		return err
 	}
 	cur := home
 	title := "Directory for " + p.Name
@@ -255,8 +256,11 @@ func (w *Wizard) askDir(p *Plan) error {
 			p.BindDir = dirRulePath(cur)
 			return nil
 		case pick == "new":
-			name, err := w.Prompt.Input("New folder in "+config.ContractHome(cur), "It is created after you confirm the summary.", "", func(s string) error {
-				if s == "" || s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
+			name, err := w.Prompt.Input("New folder in "+config.ContractHome(cur), "It is created after you confirm the summary. Leave empty to go back.", "", func(s string) error {
+				if s == "" {
+					return nil
+				}
+				if s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
 					return fmt.Errorf("enter a folder name without /")
 				}
 				target := filepath.Join(cur, s)
@@ -268,10 +272,16 @@ func (w *Wizard) askDir(p *Plan) error {
 			if err != nil {
 				return err
 			}
+			if name == "" {
+				continue
+			}
 			p.BindDir, p.CreateDir = dirRulePath(filepath.Join(cur, name)), true
 			return nil
 		case pick == "type":
-			return w.typeDir(p)
+			done, err := w.typeDir(p)
+			if err != nil || done {
+				return err
+			}
 		case pick == "skip":
 			return nil
 		case pick == "up":
@@ -370,7 +380,7 @@ func (w *Wizard) validateDir(dir string) error {
 	return nil
 }
 
-func (w *Wizard) typeDir(p *Plan) error {
+func (w *Wizard) typeDir(p *Plan) (bool, error) {
 	validate := func(s string) error {
 		if s == "" {
 			return nil
@@ -381,29 +391,89 @@ func (w *Wizard) typeDir(p *Plan) error {
 		if info, err := os.Stat(config.ExpandHome(s)); err == nil && !info.IsDir() {
 			return fmt.Errorf("%s is a file, not a directory", s)
 		}
+		if dirRulePath(s) == "~/" {
+			return nil
+		}
 		return w.validateDir(config.ExpandHome(s))
 	}
-	dir, err := w.Prompt.Input("Directory path", "Every repo under this directory uses "+p.Name+". Leave empty to skip.", "", validate)
+	dir, err := w.Prompt.PathInput("Directory path", "Every repo under it uses "+p.Name+". Tab completes. Leave empty to go back.", validate, CompleteDir, w.pathStatus)
 	if err != nil || dir == "" {
-		return err
+		return false, err
 	}
 	if dirRulePath(dir) == "~/" {
 		p.MakeDefault = true
-		return nil
+		return true, nil
 	}
 	p.BindDir = dirRulePath(dir)
-	if !fileExists(config.ExpandHome(p.BindDir)) {
-		create, err := w.Prompt.Confirm(p.BindDir+" does not exist. Create it?", "", true)
-		if err != nil {
-			return err
-		}
-		if !create {
-			p.BindDir = ""
-			return nil
-		}
-		p.CreateDir = true
+	p.CreateDir = !fileExists(config.ExpandHome(p.BindDir))
+	return true, nil
+}
+
+func (w *Wizard) pathStatus(s string) string {
+	if s == "" || (!strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "~")) {
+		return ""
 	}
-	return nil
+	path := config.ExpandHome(s)
+	if dirRulePath(s) == "~/" {
+		return "★ your home folder: " + defaultNote(w.Config.Default)
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && !info.IsDir():
+		return "✗ this is a file"
+	case err == nil:
+		if verr := w.validateDir(path); verr != nil {
+			return "✗ " + verr.Error()
+		}
+		if d := w.describeDir(path); d != "" {
+			return "✓ exists · " + d
+		}
+		return "✓ exists"
+	}
+	return "+ new folder, created after you confirm"
+}
+
+func defaultNote(currentDefault string) string {
+	if currentDefault == "" {
+		return "makes it the default for every folder without an identity"
+	}
+	return "makes it the default, replaces " + currentDefault
+}
+
+func CompleteDir(input string) []string {
+	if input == "" {
+		input = "~/"
+	}
+	if !strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "~") {
+		return nil
+	}
+	if input == "~" {
+		input = "~/"
+	}
+	parent, prefix := input, ""
+	if !strings.HasSuffix(input, "/") {
+		i := strings.LastIndex(input, "/")
+		parent, prefix = input[:i+1], input[i+1:]
+	}
+	entries, err := os.ReadDir(config.ExpandHome(parent))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") && !strings.HasPrefix(prefix, ".") {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
+			continue
+		}
+		if e.IsDir() || (e.Type()&os.ModeSymlink != 0 && isDir(filepath.Join(config.ExpandHome(parent), name))) {
+			out = append(out, parent+name+"/")
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
+	return out
 }
 
 func subdirs(dir string) []string {
