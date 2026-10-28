@@ -19,7 +19,7 @@ func newRootCmd() *cobra.Command {
 		RunE:          runStatus,
 	}
 	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd(),
-		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd(), newGuardCmd(), newAllowCmd(), newCheckCommitCmd(), newDoctorCmd())
+		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd(), newRmCmd(), newGuardCmd(), newAllowCmd(), newCheckCommitCmd(), newDoctorCmd())
 	return root
 }
 
@@ -28,19 +28,31 @@ func newAddCmd() *cobra.Command {
 	var protocol string
 	var makeDefault bool
 	cmd := &cobra.Command{
-		Use:   "add <identity>",
-		Short: "Add an identity",
-		Args:  cobra.ExactArgs(1),
+		Use:   "add [identity]",
+		Short: "Add an identity (asks questions when --email is not given)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			if err := config.ValidateIdentityName(name); err != nil {
-				return err
-			}
 			c, err := config.Load()
 			if errors.Is(err, config.ErrNotFound) {
 				c, err = config.New(), nil
 			}
 			if err != nil {
+				return err
+			}
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			if !cmd.Flags().Changed("email") {
+				return runAddWizard(cmd, c, name)
+			}
+			if name == "" {
+				return fmt.Errorf("give an identity name, or leave out the flags to answer questions")
+			}
+			if id.Name == "" {
+				return fmt.Errorf("--name is required with --email")
+			}
+			if err := config.ValidateIdentityName(name); err != nil {
 				return err
 			}
 			if _, exists := c.Identities[name]; exists {
@@ -61,8 +73,8 @@ func newAddCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&id.Name, "name", "", "commit author name (required)")
-	f.StringVar(&id.Email, "email", "", "commit author email (required)")
+	f.StringVar(&id.Name, "name", "", "commit author name")
+	f.StringVar(&id.Email, "email", "", "commit author email (without it, add asks questions)")
 	f.StringVar(&id.SSHKey, "ssh-key", "", "path to SSH private key")
 	f.StringVar(&id.SigningKey, "signing-key", "", "commit signing key")
 	f.StringVar(&id.GHUser, "gh-user", "", "GitHub login")
@@ -70,8 +82,6 @@ func newAddCmd() *cobra.Command {
 	f.StringVar(&protocol, "protocol", "", "git protocol: https or ssh")
 	f.StringVar(&id.Color, "color", "", "prompt color")
 	f.BoolVar(&makeDefault, "default", false, "use when no rule matches")
-	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("email")
 	return cmd
 }
 
