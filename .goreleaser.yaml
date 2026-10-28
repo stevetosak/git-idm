@@ -1,0 +1,49 @@
+version: 2
+
+project_name: git-idm
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: git-idm
+    main: ./cmd/git-idm
+    binary: git-idm
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/stevetosak/git-idm/internal/version.Version={{ .Tag }}
+
+archives:
+  - id: git-idm
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^chore"
+      - "Merge "
+
+release:
+  github:
+    owner: stevetosak
+    name: git-idm
+  prerelease: auto
