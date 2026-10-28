@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
@@ -136,7 +139,7 @@ func newImportCmd() *cobra.Command {
 						continue
 					}
 				}
-				if err := runSetupWizard(cmd, c, func(w *setup.Wizard) { w.Import, w.DefaultName = &e, e.ID }); err != nil {
+				if err := runSetupWizard(cmd, c, func(w *setup.Wizard) { w.Import, w.DefaultName, w.HasGPGKey = &e, e.ID, hasGPGKey }); err != nil {
 					return err
 				}
 			}
@@ -155,4 +158,14 @@ func confirmImport(cmd *cobra.Command, e transfer.Entry, n, total int) (bool, er
 		return false, nil
 	}
 	return ok, err
+}
+
+func hasGPGKey(id string) bool {
+	gpg, err := exec.LookPath("gpg")
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, gpg, "--batch", "--list-secret-keys", "--with-colons", "--", id).Run() == nil
 }

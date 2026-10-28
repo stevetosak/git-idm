@@ -116,6 +116,10 @@ func (e *Editor) checkScope(p *Plan) {
 }
 
 func (e *Editor) askSigning(p *Plan) error {
+	return askSigning(e.Prompt, p, "Signed commits show as Verified on GitHub when the key and the email are on your account.")
+}
+
+func askSigning(prompt Prompter, p *Plan, description string) error {
 	var choices []Choice
 	own := ""
 	if p.SSHKey != "" {
@@ -135,7 +139,7 @@ func (e *Editor) askSigning(p *Plan) error {
 	if current == "" {
 		current = "off"
 	}
-	pick, err := e.Prompt.Select("Commit signing", "Signed commits show as Verified on GitHub when the key and the email are on your account.", choices, current)
+	pick, err := prompt.Select("Commit signing", description, choices, current)
 	if err != nil {
 		return err
 	}
@@ -148,7 +152,7 @@ func (e *Editor) askSigning(p *Plan) error {
 	if p.GHUser == "" || p.NoSigningScope || !strings.HasSuffix(pick, ".pub") {
 		return nil
 	}
-	p.UploadSigning, err = e.Prompt.Confirm("Add the key to "+p.GHUser+" on GitHub as a signing key?", "", true)
+	p.UploadSigning, err = prompt.Confirm("Add the key to "+p.GHUser+" on GitHub as a signing key?", "", true)
 	return err
 }
 

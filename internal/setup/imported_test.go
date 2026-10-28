@@ -94,3 +94,92 @@ func TestWizardImportOtherGitHubAccount(t *testing.T) {
 		t.Errorf("must ask about the other account: %v", f.asked)
 	}
 }
+
+func signingAnswers(extra map[string][]string) map[string][]string {
+	answers := map[string][]string{
+		"Author name":           {"<default>"},
+		"Email":                 {"<default>"},
+		"Directory for oss":     {"skip"},
+		"Prompt color":          {"<default>"},
+		"Create this identity?": {"yes"},
+	}
+	for k, v := range extra {
+		answers[k] = v
+	}
+	return answers
+}
+
+func TestWizardImportSSHSigningUsesNewKey(t *testing.T) {
+	sandbox(t)
+	f := &fakePrompter{t: t, answers: signingAnswers(map[string][]string{
+		"GitHub account":                     {"login"},
+		"SSH key":                            {"generate"},
+		"Key passphrase":                     {"no"},
+		"Add the key to jane-oss on GitHub?": {"yes"},
+		"Commit signing":                     {"<default>"},
+		"Add the key to jane-oss on GitHub as a signing key?": {"yes"},
+	})}
+	e := transfer.Entry{ID: "oss", Name: "Jane", Email: "jane@oss.example", GitHubUser: "jane-oss", Signing: transfer.SigningSSH}
+	w := Wizard{Prompt: f, Config: existing(), DefaultName: e.ID, Import: &e,
+		Login: func(string) (Account, string, error) { return Account{Login: "jane-oss"}, "~/gh/oss", nil }}
+	p, err := w.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SigningKey != "~/.ssh/git-idm_oss.pub" || !p.UploadSigning {
+		t.Fatalf("plan = %+v", p)
+	}
+	if !strings.Contains(p.Summary(), "signs  ~/.ssh/git-idm_oss.pub, added to GitHub") {
+		t.Errorf("summary:\n%s", p.Summary())
+	}
+}
+
+func TestWizardImportGPGSigning(t *testing.T) {
+	cases := map[string]struct {
+		key     string
+		inRing  bool
+		want    string
+		hasKeep bool
+		note    string
+	}{
+		"key in keyring":     {"3AA5C34371567BD2", true, "3AA5C34371567BD2", true, "is in your gpg keyring"},
+		"key not in keyring": {"3AA5C34371567BD2", false, "", false, "does not have it"},
+		"no key ID":          {"", false, "", false, "has no key ID"},
+	}
+	for name, c := range cases {
+		sandbox(t)
+		f := &fakePrompter{t: t, answers: signingAnswers(map[string][]string{
+			"SSH key":        {"none"},
+			"Commit signing": {"<default>"},
+		})}
+		var described string
+		e := transfer.Entry{ID: "oss", Name: "Jane", Email: "jane@oss.example", Signing: transfer.SigningGPG, GPGKey: c.key}
+		w := Wizard{Prompt: describingPrompter{f, &described}, Config: existing(), DefaultName: e.ID, Import: &e,
+			HasGPGKey: func(id string) bool { return c.inRing && id == c.key }}
+		p, err := w.Run()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if p.SigningKey != c.want {
+			t.Errorf("%s: signing key %q, want %q", name, p.SigningKey, c.want)
+		}
+		if hasChoice(f.choices["Commit signing"], c.key) != c.hasKeep {
+			t.Errorf("%s: choices %v", name, f.choices["Commit signing"])
+		}
+		if !strings.Contains(described, c.note) {
+			t.Errorf("%s: description %q misses %q", name, described, c.note)
+		}
+	}
+}
+
+type describingPrompter struct {
+	*fakePrompter
+	signing *string
+}
+
+func (d describingPrompter) Select(title, description string, choices []Choice, value string) (string, error) {
+	if title == "Commit signing" {
+		*d.signing = description
+	}
+	return d.fakePrompter.Select(title, description, choices, value)
+}

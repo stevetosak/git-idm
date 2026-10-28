@@ -56,6 +56,7 @@ type Wizard struct {
 	Logins      []GHLogin
 	Verify      func(dir string) (Account, error)
 	Import      *transfer.Entry
+	HasGPGKey   func(id string) bool
 }
 
 var nonNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -96,6 +97,9 @@ func (w *Wizard) run() (Plan, error) {
 		p.SSH = SSHNone
 	}
 	if err := w.askSSH(&p); err != nil {
+		return p, err
+	}
+	if err := w.askImportedSigning(&p); err != nil {
 		return p, err
 	}
 	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), w.defaultColor()); err != nil {
@@ -527,6 +531,13 @@ func (p Plan) Summary() string {
 		fmt.Fprintf(&b, "       added to GitHub\n")
 	case p.KeyNotAdded():
 		fmt.Fprintf(&b, "       not added to GitHub: the gh login cannot add keys\n")
+	}
+	if p.SigningKey != "" {
+		upload := ""
+		if p.UploadSigning {
+			upload = ", added to GitHub"
+		}
+		fmt.Fprintf(&b, "signs  %s%s\n", p.SigningKey, upload)
 	}
 	switch {
 	case p.MakeDefault:
