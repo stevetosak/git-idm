@@ -124,3 +124,13 @@ func TestIdentityName(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvrcLegacyFromRules(t *testing.T) {
+	home := sandboxHome(t)
+	write(t, filepath.Join(home, "P", ".envrc"), "export GH_CONFIG_DIR=~/.config/gh-p\nexport FOO=1\n")
+	write(t, filepath.Join(home, "Q", ".envrc"), "export FOO=1\n")
+	got := EnvrcLegacy([]config.Rule{{Path: "~/P/", Identity: "p"}, {Path: "~/Q/", Identity: "q"}, {Path: "~/R/", Identity: "r"}})
+	if len(got) != 1 || got[0].Path != "~/P/.envrc" || got[0].Detail != "remove GH_CONFIG_DIR line" {
+		t.Fatalf("got %+v", got)
+	}
+}

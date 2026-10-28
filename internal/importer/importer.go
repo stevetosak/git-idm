@@ -19,9 +19,11 @@ const (
 )
 
 type Legacy struct {
-	Kind   LegacyKind
-	Path   string
-	Detail string
+	Kind      LegacyKind
+	Path      string
+	Detail    string
+	Condition string
+	RulePath  string
 }
 
 type Result struct {
@@ -92,6 +94,9 @@ func (r *Result) importInclude(global gitConfig, inc include) {
 		return
 	}
 	file := config.ExpandHome(inc.Path)
+	if managedByGitIDM(file) {
+		return
+	}
 	included, err := readFile(file)
 	if err != nil {
 		r.Skipped = append(r.Skipped, fmt.Sprintf("includeIf %q: %v", inc.Condition, err))
@@ -108,11 +113,7 @@ func (r *Result) importInclude(global gitConfig, inc include) {
 		id.GHConfigDir = dir
 		id.GHUser = ghUserFromConfigDir(dir)
 		ghSource = config.ContractHome(envrc)
-		detail := "remove GH_CONFIG_DIR line"
-		if envrcOnlySetsGHConfigDir(envrc) {
-			detail = "delete file (it only sets GH_CONFIG_DIR)"
-		}
-		r.Legacy = append(r.Legacy, Legacy{Kind: LegacyEnvrc, Path: ghSource, Detail: detail})
+		r.Legacy = append(r.Legacy, envrcLegacy(envrc, rule.Path))
 	}
 	name := r.uniqueName(identityName(inc.Path, rule.Path))
 	r.Config.Identities[name] = id
@@ -120,9 +121,37 @@ func (r *Result) importInclude(global gitConfig, inc include) {
 	r.Findings = append(r.Findings, describe(name, id, inc.Path, sshSource(included), ghSource)+
 		fmt.Sprintf("\n    rule:  %s  (from includeIf %q)", rule.Path, inc.Condition))
 	r.Legacy = append(r.Legacy,
-		Legacy{Kind: LegacyInclude, Path: "~/.gitconfig", Detail: fmt.Sprintf("includeIf %q", inc.Condition)},
-		Legacy{Kind: LegacyFile, Path: config.ContractHome(file), Detail: "replaced by generated identity file"},
+		Legacy{Kind: LegacyInclude, Path: "~/.gitconfig", Detail: fmt.Sprintf("remove includeIf %q", inc.Condition), Condition: inc.Condition, RulePath: rule.Path},
+		Legacy{Kind: LegacyFile, Path: config.ContractHome(file), Detail: "delete (replaced by generated identity file)", RulePath: rule.Path},
 	)
+}
+
+func EnvrcLegacy(rules []config.Rule) []Legacy {
+	var out []Legacy
+	for _, r := range rules {
+		envrc := filepath.Join(config.ExpandHome(r.Path), ".envrc")
+		if ghConfigDirFromEnvrc(envrc) != "" {
+			out = append(out, envrcLegacy(envrc, r.Path))
+		}
+	}
+	return out
+}
+
+func envrcLegacy(envrc, rulePath string) Legacy {
+	detail := "remove GH_CONFIG_DIR line"
+	if envrcOnlySetsGHConfigDir(envrc) {
+		detail = "delete (it only sets GH_CONFIG_DIR)"
+	}
+	return Legacy{Kind: LegacyEnvrc, Path: config.ContractHome(envrc), Detail: detail, RulePath: rulePath}
+}
+
+func managedByGitIDM(file string) bool {
+	dir, err := config.Dir()
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(dir, file)
+	return err == nil && !strings.HasPrefix(rel, "..")
 }
 
 func identityFrom(cfg, global gitConfig) config.Identity {
