@@ -16,6 +16,7 @@ type fakePrompter struct {
 	asked   []string
 	errors  []string
 	choices map[string][]Choice
+	notes   map[string]string
 }
 
 func (f *fakePrompter) next(title string) string {
@@ -90,8 +91,12 @@ func (f *fakePrompter) Confirm(title, _ string, value bool) (bool, error) {
 	return value, nil
 }
 
-func (f *fakePrompter) Note(title, _ string) error {
+func (f *fakePrompter) Note(title, body string) error {
 	f.asked = append(f.asked, title)
+	if f.notes == nil {
+		f.notes = map[string]string{}
+	}
+	f.notes[title] = body
 	return nil
 }
 

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/importer"
+	"github.com/stevetosak/git-idm/internal/setup"
 )
 
 func newInitCmd() *cobra.Command {
@@ -15,9 +17,16 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Import your current git, SSH and gh setup",
-		Long:  "Read your current setup and show the identities git-idm would create.\nNothing is written unless --write is given. --write only writes the git-idm config file.",
-		Args:  cobra.NoArgs,
+		Long: "Read your current git, SSH and gh setup and turn it into git-idm identities.\n" +
+			"In a terminal, init shows each identity it found and asks what to keep. Without a terminal,\n" +
+			"init only prints the result; --write then saves the config file.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().NFlag() == 0 {
+				if prompter, err := newPrompter(cmd); err == nil {
+					return runInitReview(cmd, prompter, defaultName)
+				}
+			}
 			res, err := importer.Import(importer.Options{DefaultName: defaultName})
 			if err != nil {
 				return err
@@ -72,5 +81,52 @@ func printImport(out io.Writer, res *importer.Result) error {
 		return err
 	}
 	fmt.Fprintf(out, "\nProposed config.toml:\n%s", data)
+	return nil
+}
+
+func runInitReview(cmd *cobra.Command, prompter setup.Prompter, defaultName string) error {
+	out := cmd.OutOrStdout()
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	if importer.Exists() {
+		fmt.Fprintf(out, "git-idm is already set up (%s).\nAdd an identity with: git-idm add\n", config.ContractHome(path))
+		return nil
+	}
+	res, err := importer.Import(importer.Options{DefaultName: defaultName})
+	if err != nil {
+		return err
+	}
+	if len(res.Config.Identities) == 0 {
+		fmt.Fprintln(out, "No git identity found to import. Create one with: git-idm add")
+		return nil
+	}
+	c, err := (&setup.Reviewer{Prompt: prompter}).Run(res.Config)
+	if errors.Is(err, setup.ErrAborted) {
+		fmt.Fprintln(out, "nothing was imported")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := c.Save(); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  ✓ saved %s\n", config.ContractHome(path))
+	if err := applyConfig(io.Discard, c); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "  ✓ git config applied")
+	if len(res.Skipped) > 0 {
+		fmt.Fprintln(out, "\nNot imported:")
+		for _, s := range res.Skipped {
+			fmt.Fprintf(out, "  %s\n", s)
+		}
+	}
+	if legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules)); len(legacy) > 0 {
+		fmt.Fprintf(out, "\nYour old setup is still in place (%d entries). Remove it with: git-idm migrate\n", len(legacy))
+	}
+	fmt.Fprintln(out, "\nDone. Check any time with: git-idm")
 	return nil
 }
