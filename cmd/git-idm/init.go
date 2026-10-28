@@ -40,7 +40,7 @@ func newInitCmd() *cobra.Command {
 			if err := res.Config.Save(); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "\nWrote %s. Your git, SSH, gh and direnv files are not changed.\n", config.ContractHome(path))
+			fmt.Fprintf(out, "\nWrote %s. Your git, SSH, gh and direnv files are not changed.\nNext: `git-idm apply`, check a commit, then `git-idm migrate`.\n", config.ContractHome(path))
 			return nil
 		},
 	}

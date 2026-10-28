@@ -16,7 +16,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd())
+	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd())
 	return root
 }
 
@@ -54,7 +54,7 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "added %s <%s>\n", name, id.Email)
-			return nil
+			return applyConfig(cmd.OutOrStdout(), c)
 		},
 	}
 	f := cmd.Flags()
