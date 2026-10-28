@@ -176,7 +176,7 @@ func TestDoctorChecksTokens(t *testing.T) {
 			t.Errorf("%q: got %+v", w.text, ch)
 		}
 	}
-	if ch := find(checks, "invalid or revoked"); ch == nil || ch.Fix != "GH_CONFIG_DIR=~/gh-p gh auth login" {
+	if ch := find(checks, "invalid or revoked"); ch == nil || ch.Fix != "git-idm login personal" {
 		t.Errorf("fix: %+v", ch)
 	}
 	if calls["gh"] != 1 || len(calls) != 5 {

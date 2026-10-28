@@ -91,7 +91,7 @@ func (e *Executor) Run(p Plan) (config.Identity, *Report, error) {
 		id.GHConfigDir = config.ContractHome(p.GHConfigDir)
 		id.GHUser = p.GHUser
 		if p.SSH != SSHNone && p.NewLogin {
-			if err := e.gh(p.GHConfigDir, "config", "set", "--host", "github.com", "git_protocol", "ssh"); err != nil {
+			if err := e.UseSSHProtocol(p.GHConfigDir); err != nil {
 				return fail("set gh git protocol", err)
 			}
 		}
@@ -144,22 +144,56 @@ func (e *Executor) Login(name string) (Account, string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Account{}, "", err
 	}
+	account, err := e.loginInto(dir, "https")
+	if err != nil {
+		e.Logout(dir, importer.GHUserFromConfigDir(dir))
+		return Account{}, "", err
+	}
+	return account, config.ContractHome(dir), nil
+}
+
+func (e *Executor) Relogin(dir string) (Account, error) {
+	if e.Tools.GH == "" {
+		return Account{}, fmt.Errorf("gh is not installed (https://cli.github.com)")
+	}
+	dir = config.ExpandHome(dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return Account{}, err
+	}
+	return e.loginInto(dir, e.gitProtocol(dir))
+}
+
+func (e *Executor) UseSSHProtocol(dir string) error {
+	return e.gh(dir, "config", "set", "--host", "github.com", "git_protocol", "ssh")
+}
+
+func (e *Executor) gitProtocol(dir string) string {
+	cmd := exec.Command(e.Tools.GH, "config", "get", "--host", "github.com", "git_protocol")
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir)
+	out, _ := cmd.Output()
+	if protocol := strings.TrimSpace(string(out)); protocol == "ssh" {
+		return protocol
+	}
+	return "https"
+}
+
+func (e *Executor) loginInto(dir, protocol string) (Account, error) {
 	scratch, err := os.MkdirTemp("", "git-idm-login-")
 	if err != nil {
-		return Account{}, "", err
+		return Account{}, err
 	}
 	defer os.RemoveAll(scratch)
 	cmd := exec.Command(e.Tools.GH, "auth", "login", "--hostname", "github.com", "--web", "--clipboard",
-		"--skip-ssh-key", "--git-protocol", "https", "--scopes", "admin:public_key")
+		"--skip-ssh-key", "--git-protocol", protocol, "--scopes", "admin:public_key")
 	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir, "GIT_CONFIG_GLOBAL="+filepath.Join(scratch, "gitconfig"))
 	cmd.Stdin = strings.NewReader("")
 	pipe, err := cmd.StderrPipe()
 	if err != nil {
-		return Account{}, "", err
+		return Account{}, err
 	}
 	cmd.Stdout = cmd.Stderr
 	if err := cmd.Start(); err != nil {
-		return Account{}, "", err
+		return Account{}, err
 	}
 	var transcript strings.Builder
 	code, opened := "", false
@@ -183,16 +217,14 @@ func (e *Executor) Login(name string) (Account, string, error) {
 		}
 	}
 	if err := cmd.Wait(); err != nil {
-		os.RemoveAll(dir)
-		return Account{}, "", fmt.Errorf("%v: %s", err, strings.TrimSpace(transcript.String()))
+		return Account{}, fmt.Errorf("%v: %s", err, strings.TrimSpace(transcript.String()))
 	}
 	account, err := e.Account(dir)
 	if err != nil {
-		e.Logout(dir, importer.GHUserFromConfigDir(dir))
-		return Account{}, "", err
+		return Account{}, err
 	}
 	fmt.Fprintf(e.Out, "  ✓ logged in as %s\n\n", account.Login)
-	return account, config.ContractHome(dir), nil
+	return account, nil
 }
 
 func (e *Executor) openBrowser(url string) {
@@ -211,13 +243,17 @@ func (e *Executor) Account(dir string) (Account, error) {
 }
 
 func (e *Executor) Logout(dir, user string) {
-	dir = config.ExpandHome(dir)
-	if user != "" && e.Tools.GH != "" {
-		cmd := exec.Command(e.Tools.GH, "auth", "logout", "--hostname", "github.com", "--user", user)
-		cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir)
-		_ = cmd.Run()
+	e.LogoutUser(dir, user)
+	os.RemoveAll(config.ExpandHome(dir))
+}
+
+func (e *Executor) LogoutUser(dir, user string) {
+	if user == "" || e.Tools.GH == "" {
+		return
 	}
-	os.RemoveAll(dir)
+	cmd := exec.Command(e.Tools.GH, "auth", "logout", "--hostname", "github.com", "--user", user)
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+config.ExpandHome(dir))
+	_ = cmd.Run()
 }
 
 func (e *Executor) gh(dir string, args ...string) error {

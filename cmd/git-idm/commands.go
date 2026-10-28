@@ -24,7 +24,7 @@ var commandGroups = []struct {
 }{
 	{"essentials", "Essentials:", []string{"add", "edit", "rm", "ls", "help"}},
 	{"switching", "Switch identity:", []string{"use", "bind", "unbind"}},
-	{"safety", "Check and protect:", []string{"doctor", "guard", "allow"}},
+	{"safety", "Check and protect:", []string{"doctor", "login", "guard", "allow"}},
 	{"setup", "Setup:", []string{"init", "migrate", "apply", "hook", "prompt", "completion"}},
 }
 
@@ -47,7 +47,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		newAddCmd(), newEditCmd(), newRmCmd(), newLsCmd(),
 		newUseCmd(), newBindCmd(), newUnbindCmd(),
-		newDoctorCmd(), newGuardCmd(), newAllowCmd(),
+		newDoctorCmd(), newLoginCmd(), newGuardCmd(), newAllowCmd(),
 		newInitCmd(), newMigrateCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
 		newEnvCmd(), newCheckCommitCmd(),
 	)

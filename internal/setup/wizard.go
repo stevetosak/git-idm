@@ -101,6 +101,12 @@ func (w *Wizard) run() (Plan, error) {
 	return p, nil
 }
 
+func (w *Wizard) AskGitHub(name string) (Plan, error) {
+	p := Plan{Name: name}
+	err := w.askGitHub(&p)
+	return p, err
+}
+
 func (w *Wizard) askGitHub(p *Plan) error {
 	if w.Login == nil {
 		return nil

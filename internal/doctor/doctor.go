@@ -111,7 +111,7 @@ func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens m
 	}
 	if id.GHConfigDir != "" {
 		user := importer.GHUserFromConfigDir(id.GHConfigDir)
-		login := loginFix(id.GHConfigDir)
+		login := "git-idm login " + name
 		token, checked := tokens[config.ExpandHome(id.GHConfigDir)]
 		switch {
 		case user == "":
@@ -129,16 +129,11 @@ func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens m
 		default:
 			add(OK, "", "gh logged in as %s, the token works", token.account.Login)
 			if !token.account.CanAddKeys() {
-				add(Info, fmt.Sprintf("GH_CONFIG_DIR=%s gh auth refresh -h github.com -s admin:public_key", id.GHConfigDir),
-					"gh login cannot add SSH keys (no admin:public_key scope)")
+				add(Info, "git-idm login "+name, "gh login cannot add SSH keys (no admin:public_key scope)")
 			}
 		}
 	}
 	return checks
-}
-
-func loginFix(dir string) string {
-	return fmt.Sprintf("GH_CONFIG_DIR=%s gh auth login", dir)
 }
 
 func checkTokens(c *config.Config, fetch func(string) (ghauth.Account, error)) map[string]tokenResult {

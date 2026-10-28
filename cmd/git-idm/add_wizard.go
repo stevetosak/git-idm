@@ -93,7 +93,7 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 	if plan.KeyNotAdded() {
 		pub := id.SSHKey + ".pub"
 		fmt.Fprintf(out, "\nThe key is not on GitHub: the gh login %s cannot add keys. To add it:\n", plan.GHUser)
-		fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh auth refresh -h github.com -s admin:public_key\n", id.GHConfigDir)
+		fmt.Fprintf(out, "  git-idm login %s\n", plan.Name)
 		fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh ssh-key add %s --title \"git-idm %s\"\n", id.GHConfigDir, pub, plan.Name)
 	}
 	fmt.Fprintf(out, "\nDone.")
