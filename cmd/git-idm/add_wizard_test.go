@@ -44,24 +44,29 @@ func TestAddWizardEndToEnd(t *testing.T) {
 	os.MkdirAll(bin, 0o755)
 	os.WriteFile(filepath.Join(bin, "gh"), []byte(`#!/bin/sh
 case "$1 $2" in
-  "auth login") printf 'github.com:\n    user: jane-client\n' > "$GH_CONFIG_DIR/hosts.yml" ;;
+  "auth login")
+    echo "! First copy your one-time code: WXYZ-9876" >&2
+    echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
+    printf 'github.com:\n    user: jane-client\n' > "$GH_CONFIG_DIR/hosts.yml" ;;
+  "api user") echo '{"login":"jane-client","name":"Jane Doe","email":"jane@client.example","id":9}' ;;
 esac
 `), 0o755)
+	os.WriteFile(filepath.Join(bin, "open"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
 	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho 'Hi jane-client! You have authenticated.' >&2\nexit 1\n"), 0o755)
 
 	answers := &lineReader{lines: []string{
-		"client",              // Identity name
-		"Jane Doe",            // Author name
-		"jane@client.example", // Email
-		"1",                   // GitHub account: log in
-		"1",                   // SSH key: generate
-		"1",                   // Key passphrase: none
-		"",                    // Add the key to GitHub: default yes
-		"y",                   // Sign commits
-		"~/Clients",           // Directory
-		"",                    // Create it: default yes
-		"",                    // Prompt color: default
-		"",                    // Create this identity: default yes
+		"client",    // Identity name
+		"1",         // GitHub account: log in
+		"",          // Author name: from GitHub
+		"",          // Email: from GitHub
+		"1",         // SSH key: generate
+		"1",         // Key passphrase: none
+		"",          // Add the key to GitHub: default yes
+		"y",         // Sign commits
+		"~/Clients", // Directory
+		"",          // Create it: default yes
+		"",          // Prompt color: default
+		"",          // Create this identity: default yes
 	}}
 	var prompts bytes.Buffer
 	oldPrompter, oldExecutor := newPrompter, newExecutor
@@ -72,7 +77,7 @@ esac
 	newExecutor = func(cmd *cobra.Command) (*setup.Executor, error) {
 		dir, _ := config.Dir()
 		return &setup.Executor{
-			Tools:     setup.Tools{GH: filepath.Join(bin, "gh"), SSHKeygen: keygen, SSH: filepath.Join(bin, "ssh")},
+			Tools:     setup.Tools{GH: filepath.Join(bin, "gh"), SSHKeygen: keygen, SSH: filepath.Join(bin, "ssh"), Open: filepath.Join(bin, "open")},
 			ConfigDir: dir, Hostname: "test", In: strings.NewReader(""), Out: cmd.OutOrStdout(),
 		}, nil
 	}
@@ -91,7 +96,7 @@ esac
 		t.Fatal(err)
 	}
 	id := c.Identities["client"]
-	if c.Default != "client" || id.Name != "Jane Doe" || id.GHUser != "jane-client" || id.SigningKey != "~/.ssh/git-idm_client.pub" {
+	if c.Default != "client" || id.Name != "Jane Doe" || id.Email != "jane@client.example" || id.GHUser != "jane-client" || id.SigningKey != "~/.ssh/git-idm_client.pub" {
 		t.Fatalf("config: default=%s identity=%+v", c.Default, id)
 	}
 	if len(c.Rules) != 1 || c.Rules[0] != (config.Rule{Path: "~/Clients/", Identity: "client"}) {
@@ -106,7 +111,7 @@ esac
 	if got, _ := cmd.Output(); strings.TrimSpace(string(got)) != "~/.ssh/git-idm_client.pub" {
 		t.Fatalf("signingkey in bound repo = %q", got)
 	}
-	for _, want := range []string{"✓ generated ~/.ssh/git-idm_client", "✓ gh logged in as jane-client", "✓ created ~/Clients/", "✓ GitHub accepts the key as jane-client", "Repos under ~/Clients/ now use client"} {
+	for _, want := range []string{"Your one-time code: WXYZ-9876\n", "✓ logged in as jane-client", "✓ generated ~/.ssh/git-idm_client", "✓ created ~/Clients/", "✓ GitHub accepts the key as jane-client", "Repos under ~/Clients/ now use client"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output misses %q:\n%s", want, out.String())
 		}

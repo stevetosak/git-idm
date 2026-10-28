@@ -40,16 +40,23 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 	if err != nil {
 		return err
 	}
-	w := setup.Wizard{Prompt: prompter, Config: c, DefaultName: name, DefaultUser: defaultAuthor(c)}
-	plan, err := w.Run()
-	if errors.Is(err, setup.ErrAborted) {
-		fmt.Fprintln(out, err)
-		return nil
-	}
+	ex, err := newExecutor(cmd)
 	if err != nil {
 		return err
 	}
-	ex, err := newExecutor(cmd)
+	w := setup.Wizard{Prompt: prompter, Config: c, DefaultName: name, DefaultUser: defaultAuthor(c), Logout: ex.Logout}
+	if ex.Tools.GH != "" {
+		w.Login = ex.Login
+	}
+	plan, err := w.Run()
+	if errors.Is(err, setup.ErrAborted) {
+		if plan.GHUser != "" {
+			fmt.Fprintln(out, "setup cancelled: logged out of", plan.GHUser, "and nothing else was changed")
+		} else {
+			fmt.Fprintln(out, err)
+		}
+		return nil
+	}
 	if err != nil {
 		return err
 	}
