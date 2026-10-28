@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,8 +22,13 @@ const (
 )
 
 type Account struct {
-	Login string `json:"login"`
-	ID    int64  `json:"id"`
+	Login  string   `json:"login"`
+	ID     int64    `json:"id"`
+	Scopes []string `json:"-"`
+}
+
+func (a Account) CanAddKeys() bool {
+	return a.Scopes == nil || slices.Contains(a.Scopes, "admin:public_key") || slices.Contains(a.Scopes, "write:public_key")
 }
 
 type Plan struct {
@@ -32,6 +38,8 @@ type Plan struct {
 	Color       string
 	GHUser      string
 	GHConfigDir string
+	NewLogin    bool
+	NoKeyScope  bool
 	SSH         SSHMode
 	SSHKey      string
 	Passphrase  bool
@@ -48,6 +56,8 @@ type Wizard struct {
 	DefaultUser string
 	Login       func(name string) (Account, string, error)
 	Logout      func(dir, user string)
+	Logins      []GHLogin
+	Verify      func(dir string) (Account, error)
 }
 
 var nonNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -56,7 +66,7 @@ var colorChoices = []string{"cyan", "green", "magenta", "yellow", "blue", "red",
 
 func (w *Wizard) Run() (Plan, error) {
 	p, err := w.run()
-	if err != nil && p.GHUser != "" && w.Logout != nil {
+	if err != nil && p.NewLogin && w.Logout != nil {
 		w.Logout(p.GHConfigDir, p.GHUser)
 	}
 	return p, err
@@ -103,16 +113,32 @@ func (w *Wizard) askGitHub(p *Plan) error {
 	if w.Login == nil {
 		return nil
 	}
+	choices := []Choice{{"login", "Log in now (opens the browser)"}}
 	description := "Your browser opens now. git-idm keeps this login separate from your other gh accounts."
+	if w.Verify != nil && len(w.Logins) > 0 {
+		for _, l := range w.Logins {
+			choices = append(choices, Choice{"use:" + l.Dir, l.label()})
+		}
+		description = "Log in to a new account in the browser, or use a gh login that you already have."
+	}
+	choices = append(choices, Choice{"skip", "Skip"})
 	for {
-		pick, err := w.Prompt.Select("GitHub account", description,
-			[]Choice{{"login", "Log in now (opens the browser)"}, {"skip", "Skip"}}, "login")
+		pick, err := w.Prompt.Select("GitHub account", description, choices, "login")
 		if err != nil || pick == "skip" {
 			return err
 		}
+		if dir, ok := strings.CutPrefix(pick, "use:"); ok {
+			account, err := w.Verify(dir)
+			if err == nil {
+				p.GHUser, p.GHConfigDir, p.NoKeyScope = account.Login, dir, !account.CanAddKeys()
+				return nil
+			}
+			description = "The login in " + dir + " does not work: " + err.Error() + "\nLog in now, pick another login, or skip."
+			continue
+		}
 		account, dir, err := w.Login(p.Name)
 		if err == nil {
-			p.GHUser, p.GHConfigDir = account.Login, dir
+			p.GHUser, p.GHConfigDir, p.NewLogin = account.Login, dir, true
 			return nil
 		}
 		description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."
@@ -213,7 +239,7 @@ func (w *Wizard) askSSH(p *Plan) error {
 	default:
 		p.SSH, p.SSHKey = SSHExisting, pick
 	}
-	if p.GHUser != "" {
+	if p.GHUser != "" && !p.NoKeyScope {
 		if p.Upload, err = w.Prompt.Confirm("Add the key to "+p.GHUser+" on GitHub?", "", true); err != nil {
 			return err
 		}
@@ -432,7 +458,7 @@ func (p Plan) Summary() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s  %s <%s>\n", p.Name, p.AuthorName, p.Email)
 	if p.GHUser != "" {
-		fmt.Fprintf(&b, "gh     logged in as %s\n", p.GHUser)
+		fmt.Fprintf(&b, "gh     %s\n", p.ghText())
 	} else {
 		fmt.Fprintf(&b, "gh     not set up\n")
 	}
@@ -448,8 +474,11 @@ func (p Plan) Summary() string {
 	default:
 		fmt.Fprintf(&b, "ssh    default key\n")
 	}
-	if p.Upload {
+	switch {
+	case p.Upload:
 		fmt.Fprintf(&b, "       added to GitHub\n")
+	case p.KeyNotAdded():
+		fmt.Fprintf(&b, "       not added to GitHub: the gh login cannot add keys\n")
 	}
 	switch {
 	case p.MakeDefault:
@@ -509,4 +538,15 @@ func required(what string) func(string) error {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func (p Plan) ghText() string {
+	if p.NewLogin {
+		return "logged in as " + p.GHUser
+	}
+	return p.GHUser + " (existing login " + p.GHConfigDir + ")"
+}
+
+func (p Plan) KeyNotAdded() bool {
+	return p.NoKeyScope && p.SSH != SSHNone
 }

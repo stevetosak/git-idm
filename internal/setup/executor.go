@@ -90,7 +90,7 @@ func (e *Executor) Run(p Plan) (config.Identity, *Report, error) {
 	if p.GHUser != "" {
 		id.GHConfigDir = config.ContractHome(p.GHConfigDir)
 		id.GHUser = p.GHUser
-		if p.SSH != SSHNone {
+		if p.SSH != SSHNone && p.NewLogin {
 			if err := e.gh(p.GHConfigDir, "config", "set", "--host", "github.com", "git_protocol", "ssh"); err != nil {
 				return fail("set gh git protocol", err)
 			}
@@ -186,7 +186,7 @@ func (e *Executor) Login(name string) (Account, string, error) {
 		os.RemoveAll(dir)
 		return Account{}, "", fmt.Errorf("%v: %s", err, strings.TrimSpace(transcript.String()))
 	}
-	account, err := e.account(dir)
+	account, err := e.Account(dir)
 	if err != nil {
 		e.Logout(dir, importer.GHUserFromConfigDir(dir))
 		return Account{}, "", err
@@ -203,18 +203,42 @@ func (e *Executor) openBrowser(url string) {
 	fmt.Fprintf(e.Out, "  Your browser opened %s. Paste the code there and log in with the account for this identity.\n", url)
 }
 
-func (e *Executor) account(dir string) (Account, error) {
-	cmd := exec.Command(e.Tools.GH, "api", "user")
-	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir)
+func (e *Executor) Account(dir string) (Account, error) {
+	if e.Tools.GH == "" {
+		return Account{}, fmt.Errorf("gh is not installed (https://cli.github.com)")
+	}
+	cmd := exec.Command(e.Tools.GH, "api", "user", "--include")
+	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+config.ExpandHome(dir))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		return Account{}, fmt.Errorf("read GitHub account: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
+	return parseAccount(string(out))
+}
+
+func parseAccount(response string) (Account, error) {
+	response = strings.ReplaceAll(response, "\r\n", "\n")
+	headers, body, found := strings.Cut(response, "\n\n")
+	if !found {
+		headers, body = "", response
+	}
 	var a Account
-	if err := json.Unmarshal(out, &a); err != nil || a.Login == "" {
+	if err := json.Unmarshal([]byte(body), &a); err != nil || a.Login == "" {
 		return Account{}, fmt.Errorf("read GitHub account: unexpected answer from gh api user")
+	}
+	for _, line := range strings.Split(headers, "\n") {
+		name, value, ok := strings.Cut(line, ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "X-OAuth-Scopes") {
+			continue
+		}
+		a.Scopes = []string{}
+		for _, scope := range strings.Split(value, ",") {
+			if scope = strings.TrimSpace(scope); scope != "" {
+				a.Scopes = append(a.Scopes, scope)
+			}
+		}
 	}
 	return a, nil
 }

@@ -70,7 +70,7 @@ func (r *Result) importDefault(global gitConfig, name string) error {
 		return nil
 	}
 	id := identityFrom(global, global)
-	id.GHConfigDir = defaultGHConfigDir()
+	id.GHConfigDir = DefaultGHConfigDir()
 	id.GHUser = GHUserFromConfigDir(id.GHConfigDir)
 	r.Config.Identities[name] = id
 	r.Config.Default = name

@@ -82,7 +82,7 @@ func envrcOnlySetsGHConfigDir(path string) bool {
 	return true
 }
 
-func defaultGHConfigDir() string {
+func DefaultGHConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return config.ContractHome(filepath.Join(xdg, "gh"))
 	}

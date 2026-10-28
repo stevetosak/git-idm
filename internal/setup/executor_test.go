@@ -126,7 +126,7 @@ func TestExecutorFullPlan(t *testing.T) {
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Hostname: "mac", Out: &out}
 	p := Plan{
 		Name: "client", AuthorName: "Jane", Email: "jane@client.example", Color: "green",
-		GHUser: "fake-user", GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
+		GHUser: "fake-user", NewLogin: true, GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
 		Upload: true, BindDir: "~/Clients/", CreateDir: true,
 	}
 	id, report, err := ex.Run(p)
@@ -177,7 +177,7 @@ func TestExecutorStopsAndReportsOnFailure(t *testing.T) {
 	tools, _ := fakeTools(t, home)
 	var out bytes.Buffer
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &out}
-	p := Plan{Name: "c", AuthorName: "J", Email: "j@c.example", GHUser: "u", GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_c", BindDir: "~/C/", CreateDir: true}
+	p := Plan{Name: "c", AuthorName: "J", Email: "j@c.example", GHUser: "u", NewLogin: true, GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_c", BindDir: "~/C/", CreateDir: true}
 	ex.Tools.GH = filepath.Join(home, "missing-gh")
 	_, report, err := ex.Run(p)
 	if err == nil || report.Failed != "set gh git protocol" {
@@ -206,7 +206,7 @@ func TestExecutorKeyAlreadyOnGitHubIsFine(t *testing.T) {
 	tools, _ := fakeTools(t, home)
 	t.Setenv("FAKE_DUPLICATE", "1")
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &bytes.Buffer{}}
-	p := Plan{Name: "d", AuthorName: "J", Email: "j@d.example", GHUser: "u", GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_d", Upload: true}
+	p := Plan{Name: "d", AuthorName: "J", Email: "j@d.example", GHUser: "u", NewLogin: true, GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_d", Upload: true}
 	if _, _, err := ex.Run(p); err != nil {
 		t.Fatal(err)
 	}

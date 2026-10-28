@@ -144,7 +144,7 @@ func TestWizardFullFlow(t *testing.T) {
 	}
 	want := Plan{
 		Name: "client", AuthorName: "Jane", Email: "jane@client.example", Color: "green",
-		GHUser: "jane-gh", GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
+		GHUser: "jane-gh", NewLogin: true, GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
 		Upload: true, BindDir: "~/Clients/", CreateDir: true,
 	}
 	if p != want {

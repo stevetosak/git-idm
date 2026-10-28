@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/importer"
 	"github.com/stevetosak/git-idm/internal/setup"
 )
 
@@ -46,11 +47,12 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 	}
 	w := setup.Wizard{Prompt: prompter, Config: c, DefaultName: name, DefaultUser: defaultAuthor(c), Logout: ex.Logout}
 	if ex.Tools.GH != "" {
-		w.Login = ex.Login
+		w.Login, w.Verify = ex.Login, ex.Account
+		w.Logins = setup.ExistingLogins(c, importer.DefaultGHConfigDir())
 	}
 	plan, err := w.Run()
 	if errors.Is(err, setup.ErrAborted) {
-		if plan.GHUser != "" {
+		if plan.NewLogin {
 			fmt.Fprintln(out, "setup cancelled: logged out of", plan.GHUser, "and nothing else was changed")
 		} else {
 			fmt.Fprintln(out, err)
@@ -85,8 +87,14 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 		return err
 	}
 	fmt.Fprintln(out, "  ✓ git config applied")
-	if id.SSHKey != "" {
+	if id.SSHKey != "" && !(plan.SSH == setup.SSHGenerate && plan.KeyNotAdded()) {
 		testConnection(out, ex, id)
+	}
+	if plan.KeyNotAdded() {
+		pub := id.SSHKey + ".pub"
+		fmt.Fprintf(out, "\nThe key is not on GitHub: the gh login %s cannot add keys. To add it:\n", plan.GHUser)
+		fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh auth refresh -h github.com -s admin:public_key\n", id.GHConfigDir)
+		fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh ssh-key add %s --title \"git-idm %s\"\n", id.GHConfigDir, pub, plan.Name)
 	}
 	fmt.Fprintf(out, "\nDone.")
 	switch {
