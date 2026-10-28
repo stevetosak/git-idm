@@ -1,8 +1,11 @@
 package migrate
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/stevetosak/git-idm/internal/config"
@@ -81,8 +84,33 @@ func apply(a *gitgen.Applier, l importer.Legacy) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("deleted (backup: %s)", config.ContractHome(backup)), nil
+	case importer.LegacyLocal:
+		return unsetLocal(a, l)
 	}
 	return "", fmt.Errorf("unknown legacy kind %q", l.Kind)
+}
+
+func unsetLocal(a *gitgen.Applier, l importer.Legacy) (string, error) {
+	if _, err := os.Stat(l.Config); err != nil {
+		return "already gone", nil
+	}
+	backup, err := a.Backup(l.Config)
+	if err != nil {
+		return "", err
+	}
+	for _, key := range l.Keys {
+		var stderr bytes.Buffer
+		cmd := exec.Command("git", "config", "--file", l.Config, "--unset-all", key)
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 5 {
+				continue
+			}
+			return "", fmt.Errorf("unset %s: %v: %s", key, err, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return fmt.Sprintf("removed %s (backup: %s)", strings.Join(l.Keys, ", "), config.ContractHome(backup)), nil
 }
 
 func removeGHConfigDirLine(path string) error {

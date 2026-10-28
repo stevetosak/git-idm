@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/localid"
 )
 
 type LegacyKind string
@@ -16,6 +17,7 @@ const (
 	LegacyInclude LegacyKind = "include"
 	LegacyFile    LegacyKind = "file"
 	LegacyEnvrc   LegacyKind = "envrc"
+	LegacyLocal   LegacyKind = "local"
 )
 
 type Legacy struct {
@@ -24,6 +26,8 @@ type Legacy struct {
 	Detail    string
 	Condition string
 	RulePath  string
+	Config    string
+	Keys      []string
 }
 
 type Result struct {
@@ -31,6 +35,7 @@ type Result struct {
 	Findings []string
 	Skipped  []string
 	Legacy   []Legacy
+	Repos    []localid.Repo
 }
 
 type Options struct {

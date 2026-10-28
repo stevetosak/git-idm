@@ -104,9 +104,10 @@ func printImport(out io.Writer, res *importer.Result) error {
 			fmt.Fprintf(out, "  %s\n", s)
 		}
 	}
-	if len(res.Legacy) > 0 {
+	legacy := append(append([]importer.Legacy{}, res.Legacy...), importer.LocalLegacy(res.Config, res.Repos)...)
+	if len(legacy) > 0 {
 		fmt.Fprintln(out, "\nTo replace later (when git-idm generates its own config):")
-		for _, l := range res.Legacy {
+		for _, l := range legacy {
 			fmt.Fprintf(out, "  %-7s %s: %s\n", l.Kind, l.Path, l.Detail)
 		}
 	}
@@ -158,7 +159,7 @@ func runInitReview(cmd *cobra.Command, prompter setup.Prompter, opts importer.Op
 			fmt.Fprintf(out, "  %s\n", s)
 		}
 	}
-	if err := offerMigrate(out, prompter, c, mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules))); err != nil {
+	if err := offerMigrate(out, prompter, c, mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, res.Repos))); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "\nDone. Check any time with: git-idm")

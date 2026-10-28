@@ -37,6 +37,7 @@ func (r *Result) importRepos(global gitConfig, opts Options) {
 		roots = append(roots, config.ExpandHome(rule.Path))
 	}
 	scan := localid.Scan(roots, localid.Options{Exclude: opts.Exclude})
+	r.Repos = scan.Repos
 	if scan.Truncated {
 		r.Skipped = append(r.Skipped, "repo scan stopped early, some repos were not read (add folders with --scan)")
 	}
