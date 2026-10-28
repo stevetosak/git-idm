@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/guard"
 	"github.com/stevetosak/git-idm/internal/resolve"
 )
 
@@ -107,7 +108,11 @@ func notes(c *config.Config, res resolve.Result) []string {
 		if res.LocalUser != "" {
 			user = res.LocalUser + " <" + res.LocalEmail + ">"
 		}
-		out = append(out, "this repo's .git/config sets the author to "+user+", commits here use it")
+		if strings.EqualFold(guard.Allowed(res.RepoRoot), res.LocalEmail) {
+			out = append(out, "this repo's .git/config sets the author to "+user+" (accepted with git-idm allow)")
+		} else {
+			out = append(out, "this repo's .git/config sets the author to "+user+", commits here use it")
+		}
 	}
 	want := config.ExpandHome(c.Identities[res.Identity].GHConfigDir)
 	if got := os.Getenv("GH_CONFIG_DIR"); want != "" && got != want {

@@ -19,7 +19,7 @@ func newRootCmd() *cobra.Command {
 		RunE:          runStatus,
 	}
 	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd(),
-		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd())
+		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd(), newGuardCmd(), newAllowCmd(), newCheckCommitCmd(), newDoctorCmd())
 	return root
 }
 
