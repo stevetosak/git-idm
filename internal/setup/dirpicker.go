@@ -167,6 +167,10 @@ func (m dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "backspace":
 		v := m.input.Value()
+		if v == "" {
+			m.setInput("~/")
+			return m, nil
+		}
 		if strings.HasSuffix(v, "/") && len(v) > 1 && m.input.Position() == len(v) {
 			trimmed := strings.TrimSuffix(v, "/")
 			m.setInput(trimmed[:strings.LastIndex(trimmed, "/")+1])

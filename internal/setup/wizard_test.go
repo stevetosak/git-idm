@@ -368,6 +368,7 @@ func TestDirEntries(t *testing.T) {
 		"~/file":      "skip:",
 		"~/.h":        "skip: dir:~/.hidden/",
 		"relative":    "skip:",
+		"":            "skip: dir:~/Projects/(2 repos) dir:~/Work/(bound to work)",
 	} {
 		if got := describe(w.dirEntries(input)); got != want {
 			t.Errorf("dirEntries(%q)\n got  %s\n want %s", input, got, want)

@@ -245,6 +245,9 @@ func (w *Wizard) askDir(p *Plan) error {
 
 func (w *Wizard) dirEntries(input string) []DirEntry {
 	skip := DirEntry{Kind: DirSkip, Label: "⨯ Skip (use it nowhere for now)"}
+	if input == "" {
+		return w.withFolders([]DirEntry{skip}, input)
+	}
 	if !strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "~") {
 		return []DirEntry{skip}
 	}
@@ -273,14 +276,20 @@ func (w *Wizard) dirEntries(input string) []DirEntry {
 		}
 		entries = append(entries, e)
 	}
-	entries = append(entries, skip)
-	for _, m := range matches {
+	return w.withFolders(append(entries, skip), input)
+}
+
+func (w *Wizard) withFolders(entries []DirEntry, input string) []DirEntry {
+	for _, m := range CompleteDir(input) {
 		entries = append(entries, DirEntry{Kind: DirFolder, Path: m, Label: m, Note: w.describeDir(config.ExpandHome(m))})
 	}
 	return entries
 }
 
 func (w *Wizard) dirStatus(input string) string {
+	if input == "" {
+		return ""
+	}
 	if !strings.HasPrefix(input, "/") && !strings.HasPrefix(input, "~") {
 		return "✗ use a full path, for example ~/Clients"
 	}

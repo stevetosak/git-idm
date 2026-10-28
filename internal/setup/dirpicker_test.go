@@ -114,3 +114,16 @@ func TestDirPickerCreateDefaultErrorsAndExit(t *testing.T) {
 		t.Fatal("ctrl+c must abort")
 	}
 }
+
+func TestDirPickerEmptyFieldReturnsHome(t *testing.T) {
+	m := press(picker(t), backspace)
+	if m.input.Value() != "" {
+		t.Fatalf("backspace on ~/ must empty the field: %q", m.input.Value())
+	}
+	if !strings.Contains(m.View(), "~/Projects/") {
+		t.Fatalf("an empty field must still list the home folders:\n%s", m.View())
+	}
+	if m = press(m, backspace); m.input.Value() != "~/" {
+		t.Fatalf("backspace on an empty field must return to ~/: %q", m.input.Value())
+	}
+}
