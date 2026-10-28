@@ -35,12 +35,20 @@ checksum:
 
 changelog:
   sort: asc
+  format: '{{ $m := .Message }}{{ range split .Message " | " }}{{ $m = . }}{{ end }}{{ $m }}'
+  groups:
+    - title: Features
+      regexp: 'feature:'
+      order: 0
+    - title: Fixes
+      regexp: 'fix:'
+      order: 1
+    - title: Other
+      order: 999
   filters:
     exclude:
-      - "^docs"
-      - "^test"
-      - "^chore"
-      - "Merge "
+      - '(^|\| )(docs|test|chore):'
+      - "^Merge "
 
 release:
   github:
