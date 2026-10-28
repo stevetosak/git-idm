@@ -26,7 +26,7 @@ var commandGroups = []struct {
 	{"essentials", "Essentials:", []string{"add", "edit", "rm", "ls", "help"}},
 	{"switching", "Switch identity:", []string{"use", "bind", "unbind"}},
 	{"safety", "Check and protect:", []string{"doctor", "login", "guard", "allow"}},
-	{"setup", "Setup:", []string{"init", "migrate", "apply", "hook", "prompt", "completion", "version", "update"}},
+	{"setup", "Setup:", []string{"init", "migrate", "export", "apply", "hook", "prompt", "completion", "version", "update"}},
 }
 
 func newRootCmd() *cobra.Command {
@@ -49,7 +49,7 @@ func newRootCmd() *cobra.Command {
 		newAddCmd(), newEditCmd(), newRmCmd(), newLsCmd(),
 		newUseCmd(), newBindCmd(), newUnbindCmd(),
 		newDoctorCmd(), newLoginCmd(), newGuardCmd(), newAllowCmd(),
-		newInitCmd(), newMigrateCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
+		newInitCmd(), newMigrateCmd(), newExportCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
 		newVersionCmd(), newUpdateCmd(), newUpdateCheckCmd(), newEnvCmd(), newCheckCommitCmd(),
 	)
 	root.SuggestionsMinimumDistance = 2
