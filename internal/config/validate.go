@@ -35,6 +35,11 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("default identity %q does not exist", c.Default)
 		}
 	}
+	switch c.Guard {
+	case "", GuardOff, GuardWarn, GuardBlock:
+	default:
+		return fmt.Errorf("guard %q: use %q, %q or %q", c.Guard, GuardOff, GuardWarn, GuardBlock)
+	}
 	seen := map[string]bool{}
 	for _, r := range c.Rules {
 		if err := r.Validate(); err != nil {

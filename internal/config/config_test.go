@@ -48,6 +48,7 @@ func TestValidateRejects(t *testing.T) {
 		"bad gh user":         func(c *Config) { id := c.Identities["work"]; id.GHUser = "a b"; c.Identities["work"] = id },
 		"bad protocol":        func(c *Config) { id := c.Identities["work"]; id.Protocol = "ftp"; c.Identities["work"] = id },
 		"unknown default":     func(c *Config) { c.Default = "ghost" },
+		"bad guard":           func(c *Config) { c.Guard = "maybe" },
 		"rule unknown id":     func(c *Config) { c.Rules = append(c.Rules, Rule{Path: "~/x/", Identity: "ghost"}) },
 		"rule relative path":  func(c *Config) { c.Rules = append(c.Rules, Rule{Path: "x/", Identity: "work"}) },
 		"rule no slash":       func(c *Config) { c.Rules = append(c.Rules, Rule{Path: "~/x", Identity: "work"}) },

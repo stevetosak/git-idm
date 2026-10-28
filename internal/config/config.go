@@ -34,8 +34,17 @@ type Rule struct {
 	Identity string `toml:"identity"`
 }
 
+type GuardMode string
+
+const (
+	GuardOff   GuardMode = "off"
+	GuardWarn  GuardMode = "warn"
+	GuardBlock GuardMode = "block"
+)
+
 type Config struct {
 	Default    string              `toml:"default"`
+	Guard      GuardMode           `toml:"guard,omitempty"`
 	Identities map[string]Identity `toml:"identities"`
 	Rules      []Rule              `toml:"rules"`
 }
@@ -135,6 +144,10 @@ func (c *Config) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (c *Config) GuardEnabled() bool {
+	return c.Guard == GuardWarn || c.Guard == GuardBlock
 }
 
 func (c *Config) RulesFor(identity string) []Rule {
