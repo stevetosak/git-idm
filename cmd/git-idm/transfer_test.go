@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/setup"
 	"github.com/stevetosak/git-idm/internal/transfer"
 )
 
@@ -86,5 +88,100 @@ func TestExportArgs(t *testing.T) {
 		if _, err := runExport(t, args...); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%v: got %v, want %q", args, err, want)
 		}
+	}
+}
+
+func TestImportEndToEnd(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	c := config.New()
+	c.Identities["work"] = config.Identity{Name: "Old", Email: "old@corp.example"}
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(home, "ids.git-idm.toml")
+	os.WriteFile(file, []byte(`format = "git-idm/identities"
+version = 1
+
+[[identity]]
+id = "work"
+name = "Jane Corp"
+email = "jane@corp.example"
+color = "red"
+protocol = "https"
+
+[[identity]]
+id = "oss"
+name = "Jane"
+email = "jane@oss.example"
+`), 0o600)
+
+	answers := &lineReader{lines: []string{
+		"",  // Import work? (1 of 2): yes
+		"",  // Author name: from the file
+		"",  // Email: from the file
+		"",  // Identity name: work-2, because work exists
+		"",  // Directory: skip
+		"",  // SSH key: none, because the file says https
+		"",  // Prompt color: from the file
+		"",  // Create this identity: yes
+		"n", // Import oss? (2 of 2): no
+	}}
+	var prompts bytes.Buffer
+	oldPrompter, oldExecutor := newPrompter, newExecutor
+	t.Cleanup(func() { newPrompter, newExecutor = oldPrompter, oldExecutor })
+	newPrompter = func(*cobra.Command) (setup.Prompter, error) {
+		return setup.HuhPrompter{Accessible: true, In: answers, Out: &prompts}, nil
+	}
+	newExecutor = func(cmd *cobra.Command) (*setup.Executor, error) {
+		dir, _ := config.Dir()
+		return &setup.Executor{ConfigDir: dir, Hostname: "test", In: strings.NewReader(""), Out: cmd.OutOrStdout()}, nil
+	}
+
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"import", file})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("%v\n%s\n--- prompts ---\n%s", err, out.String(), prompts.String())
+	}
+	c, err = config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.Identities["work-2"]
+	if got.Name != "Jane Corp" || got.Email != "jane@corp.example" || got.Color != "red" || got.SSHKey != "" {
+		t.Fatalf("work-2 = %+v\n%s\n--- prompts ---\n%s", got, out.String(), prompts.String())
+	}
+	if _, ok := c.Identities["oss"]; ok {
+		t.Error("oss was skipped and must not exist")
+	}
+	if c.Identities["work"].Email != "old@corp.example" {
+		t.Error("the existing work identity must not change")
+	}
+	if !strings.Contains(out.String(), "skipped oss") {
+		t.Errorf("missing skip message:\n%s", out.String())
+	}
+}
+
+func TestImportRejectsBadFile(t *testing.T) {
+	exportEnv(t)
+	os.WriteFile("bad.toml", []byte("format = \"git-idm/identities\"\nversion = 1\n[[identity]]\nid = \"x\"\nname = \"A\"\nemail = \"a@b.c\"\nssh_key = \"~/.ssh/id\"\n"), 0o600)
+	var out bytes.Buffer
+	root := newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"import", "bad.toml"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("got %v", err)
 	}
 }

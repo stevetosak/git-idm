@@ -36,6 +36,10 @@ var newExecutor = func(cmd *cobra.Command) (*setup.Executor, error) {
 }
 
 func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
+	return runSetupWizard(cmd, c, func(w *setup.Wizard) { w.DefaultName = name })
+}
+
+func runSetupWizard(cmd *cobra.Command, c *config.Config, configure func(*setup.Wizard)) error {
 	out := cmd.OutOrStdout()
 	prompter, err := newPrompter(cmd)
 	if err != nil {
@@ -45,11 +49,12 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 	if err != nil {
 		return err
 	}
-	w := setup.Wizard{Prompt: prompter, Config: c, DefaultName: name, DefaultUser: defaultAuthor(c), Logout: ex.Logout}
+	w := setup.Wizard{Prompt: prompter, Config: c, DefaultUser: defaultAuthor(c), Logout: ex.Logout}
 	if ex.Tools.GH != "" {
 		w.Login, w.Verify = ex.Login, ex.Account
 		w.Logins = setup.ExistingLogins(c, importer.DefaultGHConfigDir())
 	}
+	configure(&w)
 	plan, err := w.Run()
 	if errors.Is(err, setup.ErrAborted) {
 		if plan.NewLogin {

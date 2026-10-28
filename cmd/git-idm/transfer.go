@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/setup"
 	"github.com/stevetosak/git-idm/internal/transfer"
 )
 
@@ -97,4 +98,61 @@ func joinNames(names []string) string {
 		return names[0]
 	}
 	return fmt.Sprintf("%d identities", len(names))
+}
+
+func newImportCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "import <file>",
+		Short: "Create identities from an export file",
+		Long: "Read a file from git-idm export and create each identity with the add steps.\n" +
+			"The values from the file are filled in. You pick the folder, the SSH key and the GitHub login.",
+		Example: "  git-idm import work.git-idm.toml",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := transfer.ReadFile(args[0])
+			if err != nil {
+				return fmt.Errorf("read %s: %w", args[0], err)
+			}
+			if _, err := newPrompter(cmd); err != nil {
+				return fmt.Errorf("import asks questions and needs a terminal")
+			}
+			c, err := config.Load()
+			if errors.Is(err, config.ErrNotFound) {
+				c, err = config.New(), nil
+			}
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			for i := range f.Identities {
+				e := f.Identities[i]
+				if len(f.Identities) > 1 {
+					ok, err := confirmImport(cmd, e, i+1, len(f.Identities))
+					if err != nil {
+						return err
+					}
+					if !ok {
+						fmt.Fprintf(out, "skipped %s\n", e.ID)
+						continue
+					}
+				}
+				if err := runSetupWizard(cmd, c, func(w *setup.Wizard) { w.Import, w.DefaultName = &e, e.ID }); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func confirmImport(cmd *cobra.Command, e transfer.Entry, n, total int) (bool, error) {
+	prompter, err := newPrompter(cmd)
+	if err != nil {
+		return false, err
+	}
+	ok, err := prompter.Confirm(fmt.Sprintf("Import %s? (%d of %d)", e.ID, n, total), e.Name+" <"+e.Email+">", true)
+	if errors.Is(err, setup.ErrAborted) {
+		return false, nil
+	}
+	return ok, err
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/ghauth"
+	"github.com/stevetosak/git-idm/internal/transfer"
 )
 
 type SSHMode string
@@ -54,6 +55,7 @@ type Wizard struct {
 	Logout      func(dir, user string)
 	Logins      []GHLogin
 	Verify      func(dir string) (Account, error)
+	Import      *transfer.Entry
 }
 
 var nonNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -71,10 +73,14 @@ func (w *Wizard) Run() (Plan, error) {
 func (w *Wizard) run() (Plan, error) {
 	var p Plan
 	var err error
-	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", w.DefaultUser, required("author name")); err != nil {
+	author, email := w.DefaultUser, ""
+	if w.Import != nil {
+		author, email = w.Import.Name, w.Import.Email
+	}
+	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", author, required("author name")); err != nil {
 		return p, err
 	}
-	if p.Email, err = w.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", "", w.validateEmail); err != nil {
+	if p.Email, err = w.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", email, w.validateEmail); err != nil {
 		return p, err
 	}
 	if p.Name, err = w.askName(p.Email); err != nil {
@@ -86,10 +92,13 @@ func (w *Wizard) run() (Plan, error) {
 	if err := w.askGitHub(&p); err != nil {
 		return p, err
 	}
+	if w.Import != nil && w.Import.Protocol == config.ProtocolHTTPS {
+		p.SSH = SSHNone
+	}
 	if err := w.askSSH(&p); err != nil {
 		return p, err
 	}
-	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), w.unusedColor()); err != nil {
+	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), w.defaultColor()); err != nil {
 		return p, err
 	}
 	if err := w.Prompt.Note("Summary", p.Summary()); err != nil {
@@ -112,6 +121,9 @@ func (w *Wizard) AskGitHub(name string) (Plan, error) {
 }
 
 func (w *Wizard) askGitHub(p *Plan) error {
+	if w.Import != nil && w.Import.GitHubUser != "" {
+		return w.askImportedGitHub(p, w.Import.GitHubUser)
+	}
 	_, err := w.chooseGitHub(p, nil, []Choice{{"skip", "Skip"}}, "login", "")
 	return err
 }
@@ -132,6 +144,9 @@ func (w *Wizard) chooseGitHub(p *Plan, head, tail []Choice, value, exclude strin
 		}
 	}
 	choices = append(choices, tail...)
+	if w.Import != nil && w.Import.GitHubUser != "" {
+		description += "\nThe export used the account " + w.Import.GitHubUser + "."
+	}
 	for {
 		pick, err := w.Prompt.Select("GitHub account", description, choices, value)
 		if err != nil {
@@ -178,10 +193,15 @@ func (w *Wizard) askName(email string) (string, error) {
 	if suggestion == "" {
 		suggestion = SuggestName(email)
 	}
+	description := "A short name, used in the prompt and in commands. Example: client"
+	if w.Import != nil && w.DefaultName == w.Import.ID {
+		description = "An identity called " + w.Import.ID + " already exists here. Pick another name."
+		suggestion = freeName(w.Config, w.Import.ID)
+	}
 	if validate(suggestion) != nil {
 		suggestion = ""
 	}
-	return w.Prompt.Input("Identity name", "A short name, used in the prompt and in commands. Example: client", suggestion, validate)
+	return w.Prompt.Input("Identity name", description, suggestion, validate)
 }
 
 var personalMailDomains = map[string]bool{
