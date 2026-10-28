@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/importer"
+	"github.com/stevetosak/git-idm/internal/migrate"
 	"github.com/stevetosak/git-idm/internal/setup"
+	"github.com/stevetosak/git-idm/internal/shell"
 )
 
 func newInitCmd() *cobra.Command {
@@ -124,9 +129,64 @@ func runInitReview(cmd *cobra.Command, prompter setup.Prompter, defaultName stri
 			fmt.Fprintf(out, "  %s\n", s)
 		}
 	}
-	if legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules)); len(legacy) > 0 {
-		fmt.Fprintf(out, "\nYour old setup is still in place (%d entries). Remove it with: git-idm migrate\n", len(legacy))
+	if err := offerMigrate(out, prompter, c, mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules))); err != nil {
+		return err
 	}
 	fmt.Fprintln(out, "\nDone. Check any time with: git-idm")
 	return nil
+}
+
+func offerMigrate(out io.Writer, prompter setup.Prompter, c *config.Config, legacy []importer.Legacy) error {
+	covered := map[string]bool{}
+	for _, r := range c.Rules {
+		covered[r.Path] = true
+	}
+	var removable []importer.Legacy
+	var lines []string
+	envrc := false
+	for _, l := range legacy {
+		if !covered[l.RulePath] {
+			continue
+		}
+		removable = append(removable, l)
+		lines = append(lines, fmt.Sprintf("%s: %s", l.Path, l.Detail))
+		envrc = envrc || l.Kind == importer.LegacyEnvrc
+	}
+	if len(removable) == 0 {
+		return nil
+	}
+	later := "\nYour old setup is still in place. Remove it later with: git-idm migrate"
+	if err := prompter.Note("Old setup", "git-idm now does the job of these entries:\n\n"+strings.Join(lines, "\n")); err != nil {
+		return err
+	}
+	remove, err := prompter.Confirm("Remove the old setup now?", "git-idm makes a backup of each file first.", true)
+	if err != nil || !remove {
+		fmt.Fprintln(out, later)
+		return ignoreAbort(err)
+	}
+	opts := migrate.Options{}
+	if envrc {
+		_, hook := os.LookupEnv(shell.SegmentVar)
+		opts.Envrc, err = prompter.Confirm("Also remove GH_CONFIG_DIR from .envrc files?",
+			"The git-idm shell hook sets GH_CONFIG_DIR instead. Say yes only when the hook is in your ~/.zshrc.", hook)
+		if err != nil {
+			fmt.Fprintln(out, later)
+			return ignoreAbort(err)
+		}
+	}
+	a, err := gitgen.NewApplier()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "\nRemoving the old setup")
+	steps, err := migrate.Run(c, a, removable, opts)
+	printSteps(out, steps)
+	return err
+}
+
+func ignoreAbort(err error) error {
+	if errors.Is(err, setup.ErrAborted) {
+		return nil
+	}
+	return err
 }

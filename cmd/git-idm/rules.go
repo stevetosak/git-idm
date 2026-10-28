@@ -131,19 +131,23 @@ func newMigrateCmd() *cobra.Command {
 				return nil
 			}
 			steps, err := migrate.Run(c, a, legacy, opts)
-			for _, s := range steps {
-				if s.Done != "" {
-					fmt.Fprintf(out, "  done  %-7s %s: %s\n", s.Legacy.Kind, s.Legacy.Path, s.Done)
-				} else {
-					fmt.Fprintf(out, "  kept  %-7s %s: %s\n", s.Legacy.Kind, s.Legacy.Path, s.Kept)
-				}
-			}
+			printSteps(out, steps)
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Envrc, "envrc", false, "also migrate GH_CONFIG_DIR out of .envrc files")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "show what would change")
 	return cmd
+}
+
+func printSteps(out io.Writer, steps []migrate.Step) {
+	for _, s := range steps {
+		if s.Done != "" {
+			fmt.Fprintf(out, "  done  %-7s %s: %s\n", s.Legacy.Kind, s.Legacy.Path, s.Done)
+		} else {
+			fmt.Fprintf(out, "  kept  %-7s %s: %s\n", s.Legacy.Kind, s.Legacy.Path, s.Kept)
+		}
+	}
 }
 
 func mergeLegacy(lists ...[]importer.Legacy) []importer.Legacy {
