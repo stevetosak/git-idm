@@ -24,6 +24,11 @@ case "$1 $2" in
   "api user")
     echo '{"login":"fake-user","name":"Fake User","email":null,"id":7}'
     ;;
+  "api user/keys")
+    printf '[{"id":3,"key":"ssh-ed25519 OTHER"},{"id":5,"key":"%s"}]' "$(cut -d' ' -f1,2 "$HOME/.ssh/git-idm_r.pub")"
+    ;;
+  "api --method")
+    ;;
   "auth logout")
     rm -f "$GH_CONFIG_DIR/hosts.yml"
     ;;

@@ -1,69 +1,103 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/setup"
 )
 
 func newRmCmd() *cobra.Command {
-	return &cobra.Command{
+	var yes bool
+	cmd := &cobra.Command{
 		Use:   "rm <identity>",
-		Short: "Remove an identity and its directory rules",
-		Args:  cobra.ExactArgs(1),
+		Short: "Remove an identity, and optionally its SSH key, GitHub key and gh login",
+		Long: "In a terminal, rm asks what to delete. With --yes it deletes what git-idm created\n" +
+			"(git-idm_* keys, their GitHub entry, and logins under ~/.config/git-idm/gh). Without a terminal\n" +
+			"and without --yes, rm changes only the config.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
 			if err != nil {
 				return err
 			}
+			dir, err := config.Dir()
+			if err != nil {
+				return err
+			}
+			ex, err := newExecutor(cmd)
+			if err != nil {
+				return err
+			}
 			name := args[0]
-			id, ok := c.Identities[name]
-			if !ok {
-				return fmt.Errorf("identity %q does not exist", name)
+			rem := setup.Remover{Config: c, ManagedGHRoot: filepath.Join(dir, "gh")}
+			if ex.Tools.GH != "" {
+				rem.FindKey = ex.FindGitHubKey
 			}
-			if c.Default == name && len(c.Identities) > 1 {
-				return fmt.Errorf("%q is the default identity; make another identity the default first", name)
+			out := cmd.OutOrStdout()
+			var plan setup.RemovePlan
+			prompter, promptErr := newPrompter(cmd)
+			switch {
+			case yes:
+				plan, err = rem.Recommended(name)
+			case promptErr == nil:
+				rem.Prompt = prompter
+				plan, err = rem.Ask(name)
+			default:
+				plan, err = rem.ConfigOnly(name)
 			}
-			delete(c.Identities, name)
-			if c.Default == name {
-				c.Default = ""
+			if errors.Is(err, setup.ErrAborted) {
+				fmt.Fprintln(out, "nothing was removed")
+				return nil
 			}
-			kept := c.Rules[:0]
-			for _, r := range c.Rules {
-				if r.Identity != name {
-					kept = append(kept, r)
-				}
+			if err != nil {
+				return err
 			}
-			c.Rules = kept
+			wasDefault := c.Default == name
+			failed := ex.Remove(c, plan)
+			removeFromConfig(c, plan)
 			if err := c.Save(); err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "removed %s\n", name)
-			if err := applyConfig(out, c); err != nil {
+			if err := applyConfig(io.Discard, c); err != nil {
 				return err
 			}
-			var leftovers []string
-			if id.SSHKey != "" {
-				leftovers = append(leftovers, fmt.Sprintf("ssh key: rm %s %s.pub", id.SSHKey, id.SSHKey))
+			fmt.Fprintf(out, "  ✓ removed %s from the config\n", name)
+			if plan.NewDefault != "" {
+				fmt.Fprintf(out, "  ✓ %s is now the default\n", plan.NewDefault)
+			} else if c.Default == "" && wasDefault {
+				fmt.Fprintln(out, "  i no default identity now; set one with: git-idm edit <identity> --default")
 			}
-			if id.GHConfigDir != "" {
-				if dir, err := config.Dir(); err == nil && filepath.Dir(config.ExpandHome(id.GHConfigDir)) == filepath.Join(dir, "gh") {
-					leftovers = append(leftovers, "gh login: rm -r "+id.GHConfigDir)
+			if len(plan.Kept) > 0 {
+				fmt.Fprintln(out, "Kept:")
+				for _, k := range plan.Kept {
+					fmt.Fprintf(out, "  %s\n", k)
 				}
 			}
-			if id.GHUser != "" && id.SSHKey != "" {
-				leftovers = append(leftovers, "GitHub key \"git-idm "+name+"\": https://github.com/settings/keys")
-			}
-			if len(leftovers) > 0 {
-				fmt.Fprintln(out, "Kept, so you can delete them yourself:")
-				for _, l := range leftovers {
-					fmt.Fprintf(out, "  %s\n", l)
-				}
+			if len(failed) > 0 {
+				return fmt.Errorf("%d cleanup step(s) failed", len(failed))
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "delete what git-idm created, without questions")
+	return cmd
+}
+
+func removeFromConfig(c *config.Config, p setup.RemovePlan) {
+	delete(c.Identities, p.Name)
+	if c.Default == p.Name {
+		c.Default = p.NewDefault
+	}
+	kept := c.Rules[:0]
+	for _, r := range c.Rules {
+		if r.Identity != p.Name {
+			kept = append(kept, r)
+		}
+	}
+	c.Rules = kept
 }

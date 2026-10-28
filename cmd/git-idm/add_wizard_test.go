@@ -48,7 +48,10 @@ case "$1 $2" in
     echo "! First copy your one-time code: WXYZ-9876" >&2
     echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
     printf 'github.com:\n    user: jane-client\n' > "$GH_CONFIG_DIR/hosts.yml" ;;
-  "api user") echo '{"login":"jane-client","name":"Jane Doe","email":"jane@client.example","id":9}' ;;
+  "api user") echo '{"login":"jane-client","id":9}' ;;
+  "api user/keys") printf '[{"id":11,"key":"%s"}]' "$(cut -d' ' -f1,2 "$HOME/.ssh/git-idm_client.pub")" ;;
+  "api --method") echo "$*" >> "$HOME/deleted" ;;
+  "auth logout") echo "$*" >> "$HOME/loggedout" ;;
 esac
 `), 0o755)
 	os.WriteFile(filepath.Join(bin, "open"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
@@ -58,12 +61,12 @@ esac
 		"Jane Doe",            // Author name
 		"jane@client.example", // Email
 		"",                    // Identity name: suggested "client"
+		"3",                   // Directory: new folder here (in ~)
+		"Clients",             // New folder name
 		"1",                   // GitHub account: log in
 		"1",                   // SSH key: generate
 		"1",                   // Key passphrase: none
 		"",                    // Add the key to GitHub: default yes
-		"2",                   // Directory: new folder here (in ~)
-		"Clients",             // New folder name
 		"",                    // Prompt color: default
 		"",                    // Create this identity: default yes
 	}}
@@ -95,7 +98,7 @@ esac
 		t.Fatal(err)
 	}
 	id := c.Identities["client"]
-	if c.Default != "client" || id.Name != "Jane Doe" || id.Email != "jane@client.example" || id.GHUser != "jane-client" || id.SigningKey != "" {
+	if c.Default != "" || id.Name != "Jane Doe" || id.Email != "jane@client.example" || id.GHUser != "jane-client" || id.SigningKey != "" {
 		t.Fatalf("config: default=%s identity=%+v", c.Default, id)
 	}
 	if len(c.Rules) != 1 || c.Rules[0] != (config.Rule{Path: "~/Clients/", Identity: "client"}) {
@@ -135,6 +138,12 @@ esac
 			t.Errorf("output misses %q:\n%s", want, out.String())
 		}
 	}
+	answers.lines = []string{
+		"",  // Delete the SSH key: default yes
+		"",  // Remove the key from GitHub: default yes
+		"",  // Log out of gh: default yes
+		"y", // Remove client: default no
+	}
 	root = newRootCmd()
 	out.Reset()
 	root.SetOut(&out)
@@ -145,10 +154,18 @@ esac
 	if c, _ := config.Load(); len(c.Identities) != 0 || len(c.Rules) != 0 || c.Default != "" {
 		t.Fatalf("after rm: %+v", c)
 	}
-	for _, want := range []string{"rm ~/.ssh/git-idm_client ~/.ssh/git-idm_client.pub", "rm -r ~/.config/git-idm/gh/client", "settings/keys"} {
+	for _, want := range []string{"✓ removed the key from jane-client on GitHub", "✓ deleted ~/.ssh/git-idm_client", "✓ logged out of gh (jane-client)", "✓ removed client from the config"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("rm output misses %q:\n%s", want, out.String())
 		}
+	}
+	for _, gone := range []string{".ssh/git-idm_client", ".ssh/git-idm_client.pub", ".config/git-idm/gh/client"} {
+		if _, err := os.Stat(filepath.Join(home, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s must be removed", gone)
+		}
+	}
+	if deleted, _ := os.ReadFile(filepath.Join(home, "deleted")); !strings.Contains(string(deleted), "DELETE user/keys/11") {
+		t.Errorf("GitHub key not deleted: %q", deleted)
 	}
 	if len(answers.lines) != 0 {
 		t.Errorf("unused answers %v; prompts:\n%s", answers.lines, prompts.String())
