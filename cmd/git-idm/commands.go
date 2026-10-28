@@ -15,8 +15,11 @@ func newRootCmd() *cobra.Command {
 		Short:         "Git identity manager",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE:          runStatus,
 	}
-	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd())
+	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd(),
+		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd())
 	return root
 }
 
