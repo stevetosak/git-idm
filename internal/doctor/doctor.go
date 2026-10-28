@@ -105,7 +105,7 @@ func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens m
 	add := func(level Level, fix, format string, args ...any) {
 		checks = append(checks, Check{Level: level, Text: name + ": " + fmt.Sprintf(format, args...), Fix: fix})
 	}
-	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(id) {
+	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(name, id, a.Bin) {
 		add(Warn, "git-idm apply", "generated git config is missing or out of date")
 	}
 	if id.SSHKey != "" {

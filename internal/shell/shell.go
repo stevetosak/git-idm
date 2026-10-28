@@ -66,7 +66,8 @@ func Use(c *config.Config, name string, res resolve.Result) (string, error) {
 	}
 	var b strings.Builder
 	b.WriteString(clearOverride())
-	entries := gitgen.IdentityEntries(id)
+	bin, _ := gitgen.Executable()
+	entries := gitgen.IdentityEntries(name, id, bin)
 	for i, e := range entries {
 		export(&b, fmt.Sprintf("GIT_CONFIG_KEY_%d", i), e.Name())
 		export(&b, fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), e.Value)
