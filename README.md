@@ -27,7 +27,7 @@ The script checks the SHA-256 of the download and installs to `~/.local/bin`.
 
 With Go: `go install github.com/stevetosak/git-idm/cmd/git-idm@latest`
 
-**Needs:** git 2.13 or later. Optional: [gh](https://cli.github.com) for GitHub logins, zsh or bash for the shell hook.
+**Needs:** git 2.13 or later. Optional: [gh](https://cli.github.com) for GitHub logins, zsh, bash or fish for the shell hook.
 
 ## Quick start
 
@@ -44,6 +44,7 @@ Add the shell hook for the correct `gh` account after `cd`, `git-idm use` and th
 ```sh
 echo 'eval "$(git-idm hook zsh)"' >> ~/.zshrc     # zsh
 echo 'eval "$(git-idm hook bash)"' >> ~/.bashrc   # bash
+echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 ```
 
 ## Commands

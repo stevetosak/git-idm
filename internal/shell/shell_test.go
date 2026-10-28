@@ -29,3 +29,17 @@ func TestSegment(t *testing.T) {
 		}
 	}
 }
+
+func TestFishOutput(t *testing.T) {
+	t.Setenv(resolve.OverrideEnv, "")
+	c := config.New()
+	c.Identities["it's"] = config.Identity{Name: "W", Email: "w@x.example", GHConfigDir: `/h/gh \ it's`}
+	res := resolve.Result{Identity: "it's", Source: resolve.SourceRule}
+	want := "set -gx GH_CONFIG_DIR '/h/gh \\\\ it\\'s'\nset -gx _GIT_IDM_SEGMENT '\x1b[36mit\\'s\x1b[0m'\n"
+	if got := Sync(Fish, c, res); got != want {
+		t.Errorf("Sync:\n got  %q\n want %q", got, want)
+	}
+	if got := Sync(Fish, c, resolve.Result{}); got != "set -e GH_CONFIG_DIR\nset -gx _GIT_IDM_SEGMENT ''\n" {
+		t.Errorf("Sync without identity: %q", got)
+	}
+}

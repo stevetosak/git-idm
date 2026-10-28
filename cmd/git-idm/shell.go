@@ -13,21 +13,25 @@ import (
 )
 
 func hookHint() string {
-	if filepath.Base(os.Getenv("SHELL")) == string(shell.Bash) {
+	switch filepath.Base(os.Getenv("SHELL")) {
+	case string(shell.Bash):
 		return "add this line to ~/.bashrc: eval \"$(git-idm hook bash)\""
+	case string(shell.Fish):
+		return "add this line to ~/.config/fish/config.fish: git-idm hook fish | source"
 	}
 	return "add this line to ~/.zshrc: eval \"$(git-idm hook zsh)\""
 }
 
 func newHookCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "hook <zsh|bash>",
+		Use: "hook <zsh|bash|fish>",
 		Example: "  echo 'eval \"$(git-idm hook zsh)\"' >> ~/.zshrc\n" +
-			"  echo 'eval \"$(git-idm hook bash)\"' >> ~/.bashrc",
-		Short:     "Print the shell hook for ~/.zshrc or ~/.bashrc",
+			"  echo 'eval \"$(git-idm hook bash)\"' >> ~/.bashrc\n" +
+			"  echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish",
+		Short:     "Print the shell hook for zsh, bash or fish",
 		Long:      "The hook sets GH_CONFIG_DIR when you change folders, makes git-idm use work, and shows the identity in the prompt.",
 		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{string(shell.Zsh), string(shell.Bash)},
+		ValidArgs: []string{string(shell.Zsh), string(shell.Bash), string(shell.Fish)},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sh, err := shell.Parse(args[0])
 			if err != nil {

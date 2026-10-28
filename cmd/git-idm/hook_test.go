@@ -97,6 +97,54 @@ printf 'prompt_command=%s\n' "$PROMPT_COMMAND"
 	}
 }
 
+func TestFishHook(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish not installed")
+	}
+	home, bin := hookHome(t)
+	script := bin + ` apply >/dev/null
+function fish_right_prompt
+    echo -n USER
+end
+` + bin + ` hook fish | source
+` + bin + ` hook fish | source
+function p
+    set -l gh unset
+    set -q GH_CONFIG_DIR; and set gh $GH_CONFIG_DIR
+    set -l author (git var GIT_AUTHOR_IDENT | cut -d'>' -f1)
+    set -l ssh (git config core.sshCommand)
+    printf '%s|%s|%s|%s>|%s\n' $argv[1] "$gh" "$_GIT_IDM_SEGMENT" "$author" "$ssh"
+end
+cd ~/P/repo; and git init -q; and p rule
+cd ~/W/repo; and git init -q; and p default
+git-idm use personal 2>/dev/null; p override
+cd ~/P/repo; p override-moved
+git-idm use --clear 2>/dev/null; p cleared
+git-idm use ghost 2>&1 | head -1
+printf 'rprompt=%s\n' (fish_right_prompt)
+`
+	cmd := exec.Command(fish, "--no-config", "-c", script)
+	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GH_CONFIG_DIR=/leaked"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish: %v\n%s", err, out)
+	}
+	sshP := "ssh -i '" + home + "/.ssh/id_p' -o IdentitiesOnly=yes"
+	seg := func(code, label string) string { return "\x1b[" + code + "m" + label + "\x1b[0m" }
+	checkLines(t, string(out), []string{
+		"rule|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
+		"default|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|",
+		"personal is active in this shell only. Clear with: git-idm use --clear",
+		"override|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
+		"override-moved|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
+		"override cleared, personal is active: rule ~/P/",
+		"cleared|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
+		`git-idm: identity "ghost" does not exist`,
+		"rprompt=" + seg("36", "personal") + " USER",
+	})
+}
+
 func checkLines(t *testing.T, out string, want []string) {
 	t.Helper()
 	got := strings.Split(strings.TrimSpace(out), "\n")

@@ -16,9 +16,10 @@ type Shell string
 const (
 	Zsh  Shell = "zsh"
 	Bash Shell = "bash"
+	Fish Shell = "fish"
 )
 
-var Supported = []Shell{Zsh, Bash}
+var Supported = []Shell{Zsh, Bash, Fish}
 
 func Parse(name string) (Shell, error) {
 	for _, sh := range Supported {
@@ -26,7 +27,7 @@ func Parse(name string) (Shell, error) {
 			return sh, nil
 		}
 	}
-	return "", fmt.Errorf("shell %q is not supported (supported: zsh, bash)", name)
+	return "", fmt.Errorf("shell %q is not supported (supported: zsh, bash, fish)", name)
 }
 
 const (
@@ -39,11 +40,11 @@ func Sync(sh Shell, c *config.Config, res resolve.Result) string {
 	var b strings.Builder
 	id, known := c.Identities[res.Identity]
 	if known && id.GHConfigDir != "" {
-		export(&b, ghEnv, config.ExpandHome(id.GHConfigDir))
+		export(sh, &b, ghEnv, config.ExpandHome(id.GHConfigDir))
 	} else {
-		fmt.Fprintf(&b, "unset %s\n", ghEnv)
+		unset(sh, &b, ghEnv)
 	}
-	export(&b, SegmentVar, Segment(sh, c, res))
+	export(sh, &b, SegmentVar, Segment(sh, c, res))
 	return b.String()
 }
 
@@ -56,33 +57,33 @@ func Use(sh Shell, c *config.Config, name string, res resolve.Result) (string, e
 		return "", fmt.Errorf("%s is already set in this shell, git-idm cannot override safely", countEnv)
 	}
 	var b strings.Builder
-	b.WriteString(clearOverride())
+	b.WriteString(clearOverride(sh))
 	bin, _ := gitgen.Executable()
 	entries := gitgen.IdentityEntries(name, id, bin)
 	for i, e := range entries {
-		export(&b, fmt.Sprintf("GIT_CONFIG_KEY_%d", i), e.Name())
-		export(&b, fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), e.Value)
+		export(sh, &b, fmt.Sprintf("GIT_CONFIG_KEY_%d", i), e.Name())
+		export(sh, &b, fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), e.Value)
 	}
-	export(&b, countEnv, strconv.Itoa(len(entries)))
-	export(&b, resolve.OverrideEnv, name)
+	export(sh, &b, countEnv, strconv.Itoa(len(entries)))
+	export(sh, &b, resolve.OverrideEnv, name)
 	b.WriteString(Sync(sh, c, res))
 	return b.String(), nil
 }
 
 func Clear(sh Shell, c *config.Config, res resolve.Result) string {
-	return clearOverride() + Sync(sh, c, res)
+	return clearOverride(sh) + Sync(sh, c, res)
 }
 
-func clearOverride() string {
+func clearOverride(sh Shell) string {
 	if os.Getenv(resolve.OverrideEnv) == "" {
 		return ""
 	}
 	var b strings.Builder
 	n, _ := strconv.Atoi(os.Getenv(countEnv))
 	for i := 0; i < n; i++ {
-		fmt.Fprintf(&b, "unset GIT_CONFIG_KEY_%d GIT_CONFIG_VALUE_%d\n", i, i)
+		unset(sh, &b, fmt.Sprintf("GIT_CONFIG_KEY_%d", i), fmt.Sprintf("GIT_CONFIG_VALUE_%d", i))
 	}
-	fmt.Fprintf(&b, "unset %s %s\n", countEnv, resolve.OverrideEnv)
+	unset(sh, &b, countEnv, resolve.OverrideEnv)
 	return b.String()
 }
 
@@ -128,9 +129,28 @@ func paint(sh Shell, label, color string, bold bool) string {
 	if bold {
 		code = "1;" + code
 	}
+	if sh == Fish {
+		return "\x1b[" + code + "m" + label + "\x1b[0m"
+	}
 	return "\x01\x1b[" + code + "m\x02" + label + "\x01\x1b[0m\x02"
 }
 
-func export(b *strings.Builder, key, value string) {
+func export(sh Shell, b *strings.Builder, key, value string) {
+	if sh == Fish {
+		fmt.Fprintf(b, "set -gx %s %s\n", key, fishQuote(value))
+		return
+	}
 	fmt.Fprintf(b, "export %s=%s\n", key, gitgen.ShellQuote(value))
+}
+
+func unset(sh Shell, b *strings.Builder, keys ...string) {
+	if sh == Fish {
+		fmt.Fprintf(b, "set -e %s\n", strings.Join(keys, " "))
+		return
+	}
+	fmt.Fprintf(b, "unset %s\n", strings.Join(keys, " "))
+}
+
+func fishQuote(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }
