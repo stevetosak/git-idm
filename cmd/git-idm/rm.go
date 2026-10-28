@@ -19,7 +19,8 @@ func newRmCmd() *cobra.Command {
 		Long: "In a terminal, rm asks what to delete. With --yes it deletes what git-idm created\n" +
 			"(git-idm_* keys, their GitHub entry, and logins under ~/.config/git-idm/gh). Without a terminal\n" +
 			"and without --yes, rm changes only the config.",
-		Args: cobra.ExactArgs(1),
+		Example: "  git-idm rm client\n  git-idm rm client --yes",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
 			if err != nil {

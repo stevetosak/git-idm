@@ -16,6 +16,7 @@ const hookHint = "add this line to ~/.zshrc: eval \"$(git-idm hook zsh)\""
 func newHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "hook zsh",
+		Example:   `  echo 'eval "$(git-idm hook zsh)"' >> ~/.zshrc`,
 		Short:     "Print the shell hook for ~/.zshrc",
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"zsh"},
@@ -59,15 +60,16 @@ func newEnvCmd() *cobra.Command {
 func newUseCmd() *cobra.Command {
 	var forShell, clear bool
 	cmd := &cobra.Command{
-		Use:   "use <identity> | --clear",
-		Short: "Switch identity in this shell only",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "use <identity> | --clear",
+		Short:   "Switch identity in this shell only",
+		Example: "  git-idm use client\n  git-idm use --clear",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !forShell {
 				return fmt.Errorf("`use` needs the shell hook: %s", hookHint)
 			}
 			if clear == (len(args) == 1) {
-				return fmt.Errorf("give an identity or --clear")
+				return usageError(cmd, "use needs <identity> or --clear, not both")
 			}
 			c, err := config.Load()
 			if err != nil {

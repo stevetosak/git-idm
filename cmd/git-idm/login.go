@@ -18,8 +18,9 @@ func newLoginCmd() *cobra.Command {
 		Short: "Log in to GitHub again when the gh token stops working",
 		Long: "Log in again in the browser when the gh token is invalid, revoked or cannot add SSH keys.\n" +
 			"The gh folder and its settings stay the same. With no identity, use the identity that is active here.",
-		Args: cobra.MaximumNArgs(1),
-		RunE: runLogin,
+		Example: "  git-idm login personal",
+		Args:    cobra.MaximumNArgs(1),
+		RunE:    runLogin,
 	}
 }
 

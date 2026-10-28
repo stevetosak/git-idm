@@ -62,6 +62,8 @@ func newRootCmd() *cobra.Command {
 	for _, c := range root.Commands() {
 		c.GroupID = group[c.Name()]
 	}
+	helpfulArgs(root)
+	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error { return usageError(c, err.Error()) })
 	root.SetHelpCommandGroupID("essentials")
 	root.SetCompletionCommandGroupID("setup")
 	return root
