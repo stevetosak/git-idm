@@ -85,7 +85,7 @@ func (w *Wizard) run() (Plan, error) {
 	if err := w.askSSH(&p); err != nil {
 		return p, err
 	}
-	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", w.colorOptions(), w.unusedColor()); err != nil {
+	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", colorOptions(), w.unusedColor()); err != nil {
 		return p, err
 	}
 	if err := w.Prompt.Note("Summary", p.Summary()); err != nil {
@@ -196,12 +196,16 @@ func SuggestName(email string) string {
 }
 
 func (w *Wizard) validateEmail(s string) error {
+	return validateEmail(w.Config, "", s)
+}
+
+func validateEmail(c *config.Config, self, s string) error {
 	addr, err := mail.ParseAddress(s)
 	if err != nil || addr.Address != s {
 		return fmt.Errorf("enter an email address, for example you@example.com")
 	}
-	for _, name := range w.Config.Names() {
-		if strings.EqualFold(w.Config.Identities[name].Email, s) {
+	for _, name := range c.Names() {
+		if name != self && strings.EqualFold(c.Identities[name].Email, s) {
 			return fmt.Errorf("identity %q already uses this email", name)
 		}
 	}
@@ -427,7 +431,7 @@ func isDir(p string) bool {
 	return err == nil && info.IsDir()
 }
 
-func (w *Wizard) colorOptions() []Choice {
+func colorOptions() []Choice {
 	out := make([]Choice, len(colorChoices))
 	for i, c := range colorChoices {
 		out[i] = Choice{c, c}

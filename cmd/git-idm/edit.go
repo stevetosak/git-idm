@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/setup"
 )
 
 func newEditCmd() *cobra.Command {
@@ -16,7 +18,9 @@ func newEditCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <identity>",
 		Short: "Change an identity, for example its signing key",
-		Example: "  git-idm edit client --signing-key ~/.ssh/git-idm_client.pub\n" +
+		Long:  "Change an identity. With no flags, pick the fields to change from a menu.",
+		Example: "  git-idm edit client\n" +
+			"  git-idm edit client --signing-key ~/.ssh/git-idm_client.pub\n" +
 			"  git-idm edit client --email jane@client.com --color magenta",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -31,7 +35,7 @@ func newEditCmd() *cobra.Command {
 			}
 			f := cmd.Flags()
 			if f.NFlag() == 0 {
-				return fmt.Errorf("give at least one field to change, see: git-idm edit --help")
+				return runEditMenu(cmd, c, name)
 			}
 			set := func(flag string, dst *string, value string, path bool) error {
 				if !f.Changed(flag) {
@@ -101,4 +105,36 @@ func newEditCmd() *cobra.Command {
 
 func looksLikePath(s string) bool {
 	return strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~") || strings.HasPrefix(s, ".")
+}
+
+func runEditMenu(cmd *cobra.Command, c *config.Config, name string) error {
+	out := cmd.OutOrStdout()
+	prompter, err := newPrompter(cmd)
+	if err != nil {
+		return fmt.Errorf("give at least one field to change, see: git-idm edit --help")
+	}
+	edit, err := (&setup.Editor{Prompt: prompter, Config: c}).Run(name)
+	if errors.Is(err, setup.ErrAborted) {
+		fmt.Fprintln(out, "nothing was changed")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(edit.Changed) == 0 {
+		fmt.Fprintln(out, "nothing was changed")
+		return nil
+	}
+	c.Identities[name] = edit.Identity
+	switch {
+	case edit.Default:
+		c.Default = name
+	case c.Default == name:
+		c.Default = ""
+	}
+	if err := c.Save(); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "updated %s: %s\n", name, strings.Join(edit.Changed, ", "))
+	return applyConfig(out, c)
 }
