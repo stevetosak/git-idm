@@ -55,18 +55,17 @@ esac
 	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho 'Hi jane-client! You have authenticated.' >&2\nexit 1\n"), 0o755)
 
 	answers := &lineReader{lines: []string{
-		"client",  // Identity name
-		"1",       // GitHub account: log in
-		"",        // Author name: from GitHub
-		"",        // Email: from GitHub
-		"1",       // SSH key: generate
-		"1",       // Key passphrase: none
-		"",        // Add the key to GitHub: default yes
-		"y",       // Sign commits
-		"2",       // Directory: new folder here (in ~)
-		"Clients", // New folder name
-		"",        // Prompt color: default
-		"",        // Create this identity: default yes
+		"Jane Doe",            // Author name
+		"jane@client.example", // Email
+		"",                    // Identity name: suggested "client"
+		"1",                   // GitHub account: log in
+		"1",                   // SSH key: generate
+		"1",                   // Key passphrase: none
+		"",                    // Add the key to GitHub: default yes
+		"2",                   // Directory: new folder here (in ~)
+		"Clients",             // New folder name
+		"",                    // Prompt color: default
+		"",                    // Create this identity: default yes
 	}}
 	var prompts bytes.Buffer
 	oldPrompter, oldExecutor := newPrompter, newExecutor
@@ -82,12 +81,12 @@ esac
 		}, nil
 	}
 
-	root := newRootCmd()
+	add := newRootCmd()
 	var out bytes.Buffer
-	root.SetOut(&out)
-	root.SetErr(&out)
-	root.SetArgs([]string{"add"})
-	if err := root.Execute(); err != nil {
+	add.SetOut(&out)
+	add.SetErr(&out)
+	add.SetArgs([]string{"add"})
+	if err := add.Execute(); err != nil {
 		t.Fatalf("%v\n%s\n--- prompts ---\n%s", err, out.String(), prompts.String())
 	}
 
@@ -96,7 +95,7 @@ esac
 		t.Fatal(err)
 	}
 	id := c.Identities["client"]
-	if c.Default != "client" || id.Name != "Jane Doe" || id.Email != "jane@client.example" || id.GHUser != "jane-client" || id.SigningKey != "~/.ssh/git-idm_client.pub" {
+	if c.Default != "client" || id.Name != "Jane Doe" || id.Email != "jane@client.example" || id.GHUser != "jane-client" || id.SigningKey != "" {
 		t.Fatalf("config: default=%s identity=%+v", c.Default, id)
 	}
 	if len(c.Rules) != 1 || c.Rules[0] != (config.Rule{Path: "~/Clients/", Identity: "client"}) {
@@ -106,10 +105,30 @@ esac
 	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
 		t.Fatalf("%v %s", err, out)
 	}
-	cmd := exec.Command("git", "config", "user.signingkey")
+	cmd := exec.Command("git", "config", "user.email")
+	cmd.Dir = repo
+	if got, _ := cmd.Output(); strings.TrimSpace(string(got)) != "jane@client.example" {
+		t.Fatalf("email in bound repo = %q", got)
+	}
+
+	root := newRootCmd()
+	var editOut bytes.Buffer
+	root.SetOut(&editOut)
+	root.SetArgs([]string{"edit", "client", "--signing-key", "~/.ssh/git-idm_client.pub"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	cmd = exec.Command("git", "config", "user.signingkey")
 	cmd.Dir = repo
 	if got, _ := cmd.Output(); strings.TrimSpace(string(got)) != "~/.ssh/git-idm_client.pub" {
-		t.Fatalf("signingkey in bound repo = %q", got)
+		t.Fatalf("signingkey after edit = %q", got)
+	}
+	if !strings.Contains(editOut.String(), "gh ssh-key add ~/.ssh/git-idm_client.pub --type signing") {
+		t.Errorf("edit must explain how to get Verified:\n%s", editOut.String())
+	}
+	root.SetArgs([]string{"edit", "client", "--signing-key", "~/.ssh/missing.pub"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("edit with a missing key file: %v", err)
 	}
 	for _, want := range []string{"Your one-time code: WXYZ-9876\n", "✓ logged in as jane-client", "✓ generated ~/.ssh/git-idm_client", "✓ created ~/Clients/", "✓ GitHub accepts the key as jane-client", "Repos under ~/Clients/ now use client"} {
 		if !strings.Contains(out.String(), want) {
