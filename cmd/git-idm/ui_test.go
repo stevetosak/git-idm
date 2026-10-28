@@ -80,8 +80,16 @@ func TestStatusViewDefaultNoneAndWelcome(t *testing.T) {
 	if !strings.Contains(got, "○ no identity here") || !strings.Contains(got, "git-idm bind <identity> .") {
 		t.Errorf("no identity:\n%s", got)
 	}
-	if got := welcome(plain()); !strings.Contains(got, "No identities yet.") || !strings.Contains(got, "git-idm add") {
-		t.Errorf("welcome:\n%s", got)
+	if got := welcome(plain(), nil); !strings.Contains(got, "No identities yet.") || !strings.Contains(got, "git-idm add") || strings.Contains(got, "init") {
+		t.Errorf("welcome without an old setup:\n%s", got)
+	}
+	got = welcome(plain(), []string{"jane@work.example", "jane@home.example"})
+	want := "No identities yet. Your git setup already has jane@work.example, jane@home.example.\n\n" +
+		"git-idm init  import them (recommended)\n" +
+		"git-idm add   create a new identity instead\n" +
+		"git-idm help  all commands"
+	if got != want {
+		t.Errorf("welcome with an old setup:\n%s\nwant:\n%s", got, want)
 	}
 }
 

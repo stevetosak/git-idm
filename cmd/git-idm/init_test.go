@@ -163,3 +163,19 @@ func TestInitAsksBeforeChangingEnvrc(t *testing.T) {
 		t.Fatalf("the gh login from .envrc must be imported: %+v", c.Identities["personal"])
 	}
 }
+
+func TestWelcomeSuggestsInitForAnOldSetup(t *testing.T) {
+	initHome(t)
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs(nil)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Your git setup already has jane@home.example, jane@work.example.", "git-idm init  import them (recommended)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+}

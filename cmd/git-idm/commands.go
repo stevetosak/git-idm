@@ -150,7 +150,7 @@ func newLsCmd() *cobra.Command {
 			t := ui.New(out)
 			c, err := config.Load()
 			if errors.Is(err, config.ErrNotFound) || (err == nil && len(c.Identities) == 0) {
-				fmt.Fprintln(out, welcome(t))
+				fmt.Fprintln(out, welcome(t, importable()))
 				return nil
 			}
 			if err != nil {

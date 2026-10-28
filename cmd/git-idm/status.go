@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/guard"
+	"github.com/stevetosak/git-idm/internal/importer"
 	"github.com/stevetosak/git-idm/internal/resolve"
 	"github.com/stevetosak/git-idm/internal/shell"
 	"github.com/stevetosak/git-idm/internal/ui"
@@ -20,7 +21,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	t := ui.New(out)
 	c, err := config.Load()
 	if errors.Is(err, config.ErrNotFound) || (err == nil && len(c.Identities) == 0) {
-		fmt.Fprintln(out, welcome(t))
+		fmt.Fprintln(out, welcome(t, importable()))
 		return nil
 	}
 	c, res, err := current()
@@ -31,12 +32,30 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func welcome(t *ui.Theme) string {
-	return t.Bold("No identities yet.") + "\n\n" + ui.Rows(t, [][2]string{
-		{"git-idm add", "create an identity (asks a few questions)"},
-		{"git-idm init", "import your current git, SSH and gh setup"},
+func welcome(t *ui.Theme, found []string) string {
+	if len(found) == 0 {
+		return t.Bold("No identities yet.") + "\n\n" + ui.Rows(t, [][2]string{
+			{"git-idm add", "create an identity (asks a few questions)"},
+			{"git-idm help", "all commands"},
+		})
+	}
+	return t.Bold("No identities yet.") + " Your git setup already has " + strings.Join(found, ", ") + ".\n\n" + ui.Rows(t, [][2]string{
+		{"git-idm init", "import them (recommended)"},
+		{"git-idm add", "create a new identity instead"},
 		{"git-idm help", "all commands"},
 	})
+}
+
+func importable() []string {
+	res, err := importer.Import(importer.Options{})
+	if err != nil {
+		return nil
+	}
+	var emails []string
+	for _, name := range res.Config.Names() {
+		emails = append(emails, res.Config.Identities[name].Email)
+	}
+	return emails
 }
 
 func statusView(t *ui.Theme, c *config.Config, res resolve.Result) string {
