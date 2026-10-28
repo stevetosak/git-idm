@@ -104,7 +104,8 @@ func TestWizardFullFlow(t *testing.T) {
 		"Key passphrase":                        {"no"},
 		"Add the key to jane-gh on GitHub?":     {"<default>"},
 		"Sign commits with this key?":           {"yes"},
-		"Directory":                             {"relative/dir", "~/Work", "~/Clients"},
+		"Directory for client":                  {"type"},
+		"Directory path":                        {"relative/dir", "~/Work", "~/Clients"},
 		"~/Clients/ does not exist. Create it?": {"<default>"},
 		"Prompt color":                          {"<default>"},
 		"Create this identity?":                 {"<default>"},
@@ -135,7 +136,7 @@ func TestWizardFullFlow(t *testing.T) {
 	if len(f.errors) != 6 {
 		t.Fatalf("want 6 rejected answers, got %v", f.errors)
 	}
-	for _, e := range []string{`"work" already exists`, "already uses this email", "already used by \"work\"", "use a full path"} {
+	for _, e := range []string{`"work" already exists`, "already uses this email", "already bound to \"work\"", "use a full path"} {
 		if !strings.Contains(strings.Join(f.errors, "\n"), e) {
 			t.Errorf("missing validation error %q in %v", e, f.errors)
 		}
@@ -157,7 +158,7 @@ func TestWizardMinimalFlowAsksLess(t *testing.T) {
 		"Email":                 {"jane@oss.example"},
 		"GitHub account":        {"skip"},
 		"SSH key":               {"none"},
-		"Directory":             {""},
+		"Directory for oss":     {"skip"},
 		"Prompt color":          {"magenta"},
 		"Create this identity?": {"yes"},
 	}}
@@ -189,7 +190,7 @@ func TestWizardSSHChoices(t *testing.T) {
 		"Email":                       {"jane@client.example"},
 		"SSH key":                     {"~/.ssh/git-idm_client"},
 		"Sign commits with this key?": {"no"},
-		"Directory":                   {""},
+		"Directory for client":        {"skip"},
 		"Prompt color":                {"<default>"},
 		"Create this identity?":       {"yes"},
 	}}
@@ -217,7 +218,7 @@ func TestWizardDeclineLogsOut(t *testing.T) {
 		"Author name":           {"Jane"},
 		"Email":                 {"jane@x.example"},
 		"SSH key":               {"none"},
-		"Directory":             {""},
+		"Directory for x":       {"skip"},
 		"Prompt color":          {"<default>"},
 		"Create this identity?": {"no"},
 	}}
@@ -240,11 +241,78 @@ func TestWizardWithoutGHSkipsGitHubQuestion(t *testing.T) {
 		"Author name":           {"Jane"},
 		"Email":                 {"jane@y.example"},
 		"SSH key":               {"none"},
-		"Directory":             {""},
+		"Directory for y":       {"skip"},
 		"Prompt color":          {"<default>"},
 		"Create this identity?": {"yes"},
 	}}
 	if _, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "y"}).Run(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestWizardBrowseDirectories(t *testing.T) {
+	home := sandbox(t)
+	for _, d := range []string{"Projects/a/.git", "Projects/b/.git", "Projects/plain", "Work", ".hidden", "Library"} {
+		os.MkdirAll(filepath.Join(home, d), 0o700)
+	}
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Author name":              {"Jane"},
+		"Email":                    {"jane@z.example"},
+		"SSH key":                  {"none"},
+		"Directory for z":          {"dir:Work", "use", "up", "dir:Projects", "dir:a", "up", "new"},
+		"New folder in ~/Projects": {"a", "x/y", "Clients"},
+		"Prompt color":             {"<default>"},
+		"Create this identity?":    {"yes"},
+	}}
+	var history [][]Choice
+	rec := &recordingPrompter{fakePrompter: f, onSelect: func(c []Choice) { history = append(history, c) }}
+	p, err := (&Wizard{Prompt: rec, Config: existing(), DefaultName: "z"}).Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.BindDir != "~/Projects/Clients/" || !p.CreateDir {
+		t.Fatalf("plan = %+v", p)
+	}
+	labels := func(c []Choice) string {
+		var l []string
+		for _, x := range c {
+			l = append(l, strings.Join(strings.Fields(x.Label), " "))
+		}
+		return strings.Join(l, " | ")
+	}
+	homeView := labels(history[0])
+	if !strings.Contains(homeView, "Projects/ 2 repos") || !strings.Contains(homeView, "Work/ bound to work") ||
+		strings.Contains(homeView, ".hidden") || strings.Contains(homeView, "Library") {
+		t.Fatalf("home view: %s", homeView)
+	}
+	projectsView := labels(history[4])
+	if !strings.Contains(projectsView, "✓ Use ~/Projects") || !strings.Contains(projectsView, "a/ git repo") || !strings.Contains(projectsView, "plain/") {
+		t.Fatalf("projects view: %s", projectsView)
+	}
+	joined := strings.Join(f.errors, "\n")
+	for _, want := range []string{"~/Projects/a already exists", "without /"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing error %q in %v", want, f.errors)
+		}
+	}
+	if !strings.Contains(rec.descriptions[2], "✗ ~/Work/ is already bound to \"work\"") {
+		t.Errorf("binding a bound folder must show an error, got: %q", rec.descriptions[2])
+	}
+	if !strings.Contains(rec.descriptions[1], "This folder is bound to work") {
+		t.Errorf("inside a bound folder must say so, got: %q", rec.descriptions[1])
+	}
+}
+
+type recordingPrompter struct {
+	*fakePrompter
+	onSelect     func([]Choice)
+	descriptions []string
+}
+
+func (r *recordingPrompter) Select(title, description string, choices []Choice, value string) (string, error) {
+	if strings.HasPrefix(title, "Directory for") {
+		r.onSelect(choices)
+		r.descriptions = append(r.descriptions, description)
+	}
+	return r.fakePrompter.Select(title, description, choices, value)
 }

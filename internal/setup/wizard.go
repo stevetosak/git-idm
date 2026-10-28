@@ -197,6 +197,143 @@ func (w *Wizard) askSSH(p *Plan) error {
 }
 
 func (w *Wizard) askDir(p *Plan) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return w.typeDir(p)
+	}
+	cur := home
+	title := "Directory for " + p.Name
+	problem := ""
+	for {
+		description := "Every repo under it uses " + p.Name + ". Enter opens a folder, / searches.\nNow in: " + config.ContractHome(cur)
+		if note := w.insideRule(cur); note != "" {
+			description += "\n" + note
+		}
+		if problem != "" {
+			description += "\n✗ " + problem
+			problem = ""
+		}
+		choices, first := w.dirChoices(cur)
+		pick, err := w.Prompt.Select(title, description, choices, first)
+		if err != nil {
+			return err
+		}
+		switch {
+		case pick == "use":
+			if err := w.validateDir(cur); err != nil {
+				problem = err.Error()
+				continue
+			}
+			p.BindDir = dirRulePath(cur)
+			return nil
+		case pick == "new":
+			name, err := w.Prompt.Input("New folder in "+config.ContractHome(cur), "It is created after you confirm the summary.", "", func(s string) error {
+				if s == "" || s == "." || s == ".." || strings.ContainsAny(s, "/\\") {
+					return fmt.Errorf("enter a folder name without /")
+				}
+				target := filepath.Join(cur, s)
+				if fileExists(target) {
+					return fmt.Errorf("%s already exists", config.ContractHome(target))
+				}
+				return w.validateDir(target)
+			})
+			if err != nil {
+				return err
+			}
+			p.BindDir, p.CreateDir = dirRulePath(filepath.Join(cur, name)), true
+			return nil
+		case pick == "type":
+			return w.typeDir(p)
+		case pick == "skip":
+			return nil
+		case pick == "up":
+			cur = filepath.Dir(cur)
+		default:
+			cur = filepath.Join(cur, strings.TrimPrefix(pick, "dir:"))
+		}
+	}
+}
+
+func (w *Wizard) dirChoices(cur string) ([]Choice, string) {
+	choices := []Choice{
+		{"use", "✓ Use " + config.ContractHome(cur)},
+		{"new", "+ New folder here…"},
+		{"type", "✎ Type a path…"},
+		{"skip", "⨯ Skip (bind later)"},
+	}
+	if filepath.Dir(cur) != cur {
+		choices = append(choices, Choice{"up", "↑ .."})
+	}
+	first := "use"
+	for _, e := range subdirs(cur) {
+		if first == "use" {
+			first = "dir:" + e
+		}
+		choices = append(choices, Choice{"dir:" + e, fmt.Sprintf("%-28s %s", e+"/", w.describeDir(filepath.Join(cur, e)))})
+	}
+	return choices, first
+}
+
+func (w *Wizard) describeDir(dir string) string {
+	rule := dirRulePath(dir)
+	for _, r := range w.Config.Rules {
+		if r.Path == rule {
+			return "bound to " + r.Identity
+		}
+	}
+	if fileExists(filepath.Join(dir, ".git")) {
+		return "git repo"
+	}
+	repos := 0
+	entries, _ := os.ReadDir(dir)
+	if len(entries) > 500 {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(dir, e.Name(), ".git")) {
+			repos++
+		}
+	}
+	switch repos {
+	case 0:
+		return ""
+	case 1:
+		return "1 repo"
+	}
+	return fmt.Sprintf("%d repos", repos)
+}
+
+func (w *Wizard) insideRule(dir string) string {
+	best := config.Rule{}
+	path := dirRulePath(dir)
+	for _, r := range w.Config.Rules {
+		if r.Path == path {
+			return fmt.Sprintf("This folder is bound to %s. Pick a folder inside it, or another folder.", r.Identity)
+		}
+		if r.Path != path && strings.HasPrefix(path, r.Path) && len(r.Path) > len(best.Path) {
+			best = r
+		}
+	}
+	if best.Path == "" {
+		return ""
+	}
+	return fmt.Sprintf("Inside %s (%s). A rule here wins for repos below it.", best.Path, best.Identity)
+}
+
+func (w *Wizard) validateDir(dir string) error {
+	rule := config.Rule{Path: dirRulePath(dir)}
+	if err := rule.Validate(); err != nil {
+		return err
+	}
+	for _, r := range w.Config.Rules {
+		if r.Path == rule.Path {
+			return fmt.Errorf("%s is already bound to %q", r.Path, r.Identity)
+		}
+	}
+	return nil
+}
+
+func (w *Wizard) typeDir(p *Plan) error {
 	validate := func(s string) error {
 		if s == "" {
 			return nil
@@ -204,21 +341,12 @@ func (w *Wizard) askDir(p *Plan) error {
 		if !strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "~") {
 			return fmt.Errorf("use a full path, for example ~/Clients")
 		}
-		rule := config.Rule{Path: dirRulePath(s)}
-		if err := rule.Validate(); err != nil {
-			return err
-		}
-		for _, r := range w.Config.Rules {
-			if r.Path == rule.Path {
-				return fmt.Errorf("%s is already used by %q", r.Path, r.Identity)
-			}
-		}
 		if info, err := os.Stat(config.ExpandHome(s)); err == nil && !info.IsDir() {
 			return fmt.Errorf("%s is a file, not a directory", s)
 		}
-		return nil
+		return w.validateDir(config.ExpandHome(s))
 	}
-	dir, err := w.Prompt.Input("Directory", "Every repo under this directory uses "+p.Name+". Leave empty to skip.", "", validate)
+	dir, err := w.Prompt.Input("Directory path", "Every repo under this directory uses "+p.Name+". Leave empty to skip.", "", validate)
 	if err != nil || dir == "" {
 		return err
 	}
@@ -235,6 +363,30 @@ func (w *Wizard) askDir(p *Plan) error {
 		p.CreateDir = true
 	}
 	return nil
+}
+
+func subdirs(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") || name == "Library" {
+			continue
+		}
+		if e.IsDir() || (e.Type()&os.ModeSymlink != 0 && isDir(filepath.Join(dir, name))) {
+			out = append(out, name)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
+	return out
+}
+
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
 func (w *Wizard) colorOptions() []Choice {

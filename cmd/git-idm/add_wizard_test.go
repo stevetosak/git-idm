@@ -55,18 +55,18 @@ esac
 	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho 'Hi jane-client! You have authenticated.' >&2\nexit 1\n"), 0o755)
 
 	answers := &lineReader{lines: []string{
-		"client",    // Identity name
-		"1",         // GitHub account: log in
-		"",          // Author name: from GitHub
-		"",          // Email: from GitHub
-		"1",         // SSH key: generate
-		"1",         // Key passphrase: none
-		"",          // Add the key to GitHub: default yes
-		"y",         // Sign commits
-		"~/Clients", // Directory
-		"",          // Create it: default yes
-		"",          // Prompt color: default
-		"",          // Create this identity: default yes
+		"client",  // Identity name
+		"1",       // GitHub account: log in
+		"",        // Author name: from GitHub
+		"",        // Email: from GitHub
+		"1",       // SSH key: generate
+		"1",       // Key passphrase: none
+		"",        // Add the key to GitHub: default yes
+		"y",       // Sign commits
+		"2",       // Directory: new folder here (in ~)
+		"Clients", // New folder name
+		"",        // Prompt color: default
+		"",        // Create this identity: default yes
 	}}
 	var prompts bytes.Buffer
 	oldPrompter, oldExecutor := newPrompter, newExecutor

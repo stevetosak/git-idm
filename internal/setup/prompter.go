@@ -70,7 +70,11 @@ func (p HuhPrompter) Select(title, description string, choices []Choice, value s
 	if value == "" && len(choices) > 0 {
 		value = choices[0].Key
 	}
-	err := p.run(huh.NewSelect[string]().Title(title).Description(description).Options(options...).Value(&value))
+	field := huh.NewSelect[string]().Title(title).Description(description).Options(options...).Value(&value)
+	if len(choices) > 12 {
+		field = field.Height(16)
+	}
+	err := p.run(field)
 	return value, err
 }
 
