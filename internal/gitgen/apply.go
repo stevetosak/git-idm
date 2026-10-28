@@ -20,6 +20,7 @@ type Change struct {
 type Applier struct {
 	ConfigDir    string
 	GlobalConfig string
+	Bin          string
 	Now          func() time.Time
 	backupDir    string
 	backedUp     map[string]string
@@ -34,7 +35,14 @@ func NewApplier() (*Applier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Applier{ConfigDir: dir, GlobalConfig: global, Now: time.Now}, nil
+	bin, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	if real, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = real
+	}
+	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, Now: time.Now}, nil
 }
 
 func GlobalConfigPath() (string, error) {
@@ -76,17 +84,30 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	if err != nil {
 		return changes, err
 	}
+	hooks, err := a.syncHooks(c.GuardEnabled())
+	changes = append(changes, hooks...)
+	if err != nil {
+		return changes, err
+	}
 	current, err := readOptional(a.GlobalConfig)
 	if err != nil {
 		return changes, err
 	}
-	block := RenderBlock(c, func(name string) string { return config.ContractHome(a.IdentityFile(name)) })
+	block := a.Block(c)
 	updated, err := ReplaceBlock(current, block)
 	if err != nil {
 		return changes, fmt.Errorf("%s: %w", a.GlobalConfig, err)
 	}
 	ch, err := a.writeIfChanged(a.GlobalConfig, updated, true)
 	return append(changes, ch...), err
+}
+
+func (a *Applier) Block(c *config.Config) string {
+	hooksDir := ""
+	if c.GuardEnabled() {
+		hooksDir = config.ContractHome(a.HooksDir())
+	}
+	return RenderBlock(c, func(name string) string { return config.ContractHome(a.IdentityFile(name)) }, hooksDir)
 }
 
 func (a *Applier) Installed() bool {
@@ -189,6 +210,10 @@ func atomicWrite(path, content string) error {
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
+	return atomicWriteMode(path, content, mode)
+}
+
+func atomicWriteMode(path, content string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}

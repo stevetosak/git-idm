@@ -68,7 +68,7 @@ func TestRenderBlockOrdersDeeperRulesLast(t *testing.T) {
 	c := config.New()
 	c.Default = "a"
 	c.Rules = []config.Rule{{Path: "~/x/y/", Identity: "b"}, {Path: "~/x/", Identity: "a"}}
-	out := RenderBlock(c, func(n string) string { return n })
+	out := RenderBlock(c, func(n string) string { return n }, "")
 	if strings.Index(out, "~/x/y/") < strings.Index(out, "~/x/\"") {
 		t.Fatalf("deeper rule must come last:\n%s", out)
 	}

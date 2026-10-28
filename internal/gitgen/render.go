@@ -82,9 +82,13 @@ func RenderIdentity(id config.Identity) string {
 	return b.String()
 }
 
-func RenderBlock(c *config.Config, identityFile func(name string) string) string {
+func RenderBlock(c *config.Config, identityFile func(name string) string, hooksDir string) string {
 	var b strings.Builder
 	b.WriteString(BlockStart + "\n")
+	if hooksDir != "" {
+		b.WriteString("[core]\n")
+		kv(&b, "hooksPath", hooksDir)
+	}
 	if c.Default != "" {
 		b.WriteString("[include]\n")
 		kv(&b, "path", identityFile(c.Default))

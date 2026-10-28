@@ -54,3 +54,42 @@ func (a *Applier) RemoveLegacySection(section, subsection string) (backup string
 	}
 	return backup, removed, atomicWrite(a.GlobalConfig, updated)
 }
+
+func HooksPathOutsideBlock(content string) string {
+	inBlock, inCore, value := false, false, ""
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == BlockStart:
+			inBlock = true
+			continue
+		case trimmed == BlockEnd:
+			inBlock = false
+			continue
+		case inBlock:
+			continue
+		case strings.HasPrefix(trimmed, "["):
+			inCore = strings.EqualFold(strings.Trim(trimmed, "[] \t"), "core")
+			continue
+		}
+		key, v, ok := strings.Cut(trimmed, "=")
+		if inCore && ok && strings.EqualFold(strings.TrimSpace(key), "hookspath") {
+			value = strings.Trim(strings.TrimSpace(v), `"`)
+		}
+	}
+	return value
+}
+
+func ContentAfterBlock(content string) bool {
+	_, after, found := strings.Cut(content, BlockEnd)
+	if !found {
+		return false
+	}
+	for _, line := range strings.Split(after, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, ";") {
+			return true
+		}
+	}
+	return false
+}
