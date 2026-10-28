@@ -76,7 +76,7 @@ func TestExecutorLogin(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(log)
 	login := strings.Split(string(calls), "\n")[0]
-	for _, want := range []string{"auth login", "--web", "--clipboard", "--skip-ssh-key", "--scopes admin:public_key",
+	for _, want := range []string{"auth login", "--web", "--clipboard", "--skip-ssh-key", "--scopes admin:public_key,admin:ssh_signing_key",
 		"GH_CONFIG_DIR=" + filepath.Join(home, ".config", "git-idm", "gh", "client"), "stdin=notty"} {
 		if !strings.Contains(login, want) {
 			t.Errorf("login call misses %q: %s", want, login)
@@ -198,6 +198,28 @@ func TestExecutorCheckMissingTools(t *testing.T) {
 	}
 	if err := ex.Check(Plan{SSH: SSHGenerate}); err == nil {
 		t.Fatal("want error for missing ssh-keygen")
+	}
+}
+
+func TestExecutorUploadsSigningKey(t *testing.T) {
+	home := sandbox(t)
+	tools, log := fakeTools(t, home)
+	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Hostname: "mac", Out: &bytes.Buffer{}}
+	p := Plan{Name: "s", AuthorName: "J", Email: "j@s.example", GHUser: "u", GHConfigDir: "~/gh", SSH: SSHExisting, SSHKey: "~/.ssh/id_s",
+		SigningKey: "~/.ssh/id_s.pub", UploadSigning: true}
+	id, report, err := ex.Run(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.SigningKey != "~/.ssh/id_s.pub" || len(report.Done) != 1 || !strings.Contains(report.Done[0], "as a signing key") {
+		t.Fatalf("identity=%+v report=%+v", id, report)
+	}
+	calls, _ := os.ReadFile(log)
+	if want := "ssh-key add " + filepath.Join(home, ".ssh", "id_s.pub") + " --title git-idm s signing (mac) --type signing"; !strings.Contains(string(calls), want) {
+		t.Fatalf("missing %q in:\n%s", want, calls)
+	}
+	if err := (&Executor{}).Check(Plan{UploadSigning: true}); err == nil {
+		t.Fatal("a signing upload needs gh")
 	}
 }
 

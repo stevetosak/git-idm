@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,9 +86,8 @@ func newEditCmd() *cobra.Command {
 			if err := applyConfig(out, c); err != nil {
 				return err
 			}
-			if f.Changed("signing-key") && id.SigningKey != "" && strings.HasSuffix(id.SigningKey, ".pub") && id.GHConfigDir != "" {
-				fmt.Fprintf(out, "Commits are now signed. For a Verified badge on GitHub, add the key as a signing key:\n  GH_CONFIG_DIR=%s gh auth refresh -h github.com -s admin:ssh_signing_key\n  GH_CONFIG_DIR=%s gh ssh-key add %s --type signing\n",
-					id.GHConfigDir, id.GHConfigDir, id.SigningKey)
+			if f.Changed("signing-key") {
+				printSigningHint(out, name, id)
 			}
 			return nil
 		},
@@ -153,7 +153,6 @@ func runEditMenu(cmd *cobra.Command, c *config.Config, name string) error {
 		printPartial(out, report)
 		return undo(err)
 	}
-	id.SigningKey = old.SigningKey
 	c.Identities[name] = id
 	switch {
 	case plan.MakeDefault:
@@ -178,6 +177,9 @@ func runEditMenu(cmd *cobra.Command, c *config.Config, name string) error {
 		testConnection(out, ex, id)
 	}
 	printKeyHint(out, plan, id)
+	if plan.SigningKey != old.SigningKey && plan.NoSigningScope {
+		printSigningHint(out, name, id)
+	}
 	return nil
 }
 
@@ -195,4 +197,14 @@ func freeLoginName(ex *setup.Executor, name string) string {
 
 func isManagedLogin(ex *setup.Executor, dir string) bool {
 	return filepath.Dir(config.ExpandHome(dir)) == filepath.Join(ex.ConfigDir, "gh")
+}
+
+func printSigningHint(out io.Writer, name string, id config.Identity) {
+	if id.SigningKey == "" || !strings.HasSuffix(id.SigningKey, ".pub") || id.GHConfigDir == "" {
+		return
+	}
+	fmt.Fprintf(out, "\nCommits are now signed. For a Verified badge on GitHub, add the key as a signing key.\n")
+	fmt.Fprintf(out, "If the gh login cannot add signing keys, log in again first:\n")
+	fmt.Fprintf(out, "  git-idm login %s\n", name)
+	fmt.Fprintf(out, "  GH_CONFIG_DIR=%s gh ssh-key add %s --type signing --title \"git-idm %s signing\"\n", id.GHConfigDir, id.SigningKey, name)
 }

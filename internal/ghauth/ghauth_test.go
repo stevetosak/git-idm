@@ -30,6 +30,12 @@ func TestParseAccountScopes(t *testing.T) {
 			t.Errorf("%s: %+v %v canAdd=%v", tc.name, a, err, a.CanAddKeys())
 		}
 	}
+	signing, _ := Parse("HTTP/2.0 200 OK\nX-Oauth-Scopes: admin:public_key, admin:ssh_signing_key\n\n" + body)
+	noSigning, _ := Parse("HTTP/2.0 200 OK\nX-Oauth-Scopes: admin:public_key\n\n" + body)
+	unknown, _ := Parse(body)
+	if !signing.CanAddSigningKeys() || noSigning.CanAddSigningKeys() || !unknown.CanAddSigningKeys() {
+		t.Error("signing scope check")
+	}
 	if _, err := Parse("HTTP/2.0 401 Unauthorized\n\n{\"message\":\"Bad credentials\"}"); err == nil {
 		t.Error("want error without a login")
 	}

@@ -32,13 +32,17 @@ type Plan struct {
 	GHConfigDir string
 	NewLogin    bool
 	NoKeyScope  bool
-	SSH         SSHMode
-	SSHKey      string
-	Passphrase  bool
-	Upload      bool
-	BindDir     string
-	CreateDir   bool
-	MakeDefault bool
+
+	SigningKey     string
+	UploadSigning  bool
+	NoSigningScope bool
+	SSH            SSHMode
+	SSHKey         string
+	Passphrase     bool
+	Upload         bool
+	BindDir        string
+	CreateDir      bool
+	MakeDefault    bool
 }
 
 type Wizard struct {
@@ -139,6 +143,7 @@ func (w *Wizard) chooseGitHub(p *Plan, head, tail []Choice, value, exclude strin
 			account, err := w.Verify(dir)
 			if err == nil {
 				p.GHUser, p.GHConfigDir, p.NoKeyScope, p.NewLogin = account.Login, dir, !account.CanAddKeys(), false
+				p.NoSigningScope = !account.CanAddSigningKeys()
 				return pick, nil
 			}
 			description = "The login in " + dir + " does not work: " + err.Error() + "\nLog in now, pick another login, or skip."
@@ -146,6 +151,7 @@ func (w *Wizard) chooseGitHub(p *Plan, head, tail []Choice, value, exclude strin
 			account, dir, err := w.Login(p.Name)
 			if err == nil {
 				p.GHUser, p.GHConfigDir, p.NoKeyScope, p.NewLogin = account.Login, dir, false, true
+				p.NoSigningScope = false
 				return pick, nil
 			}
 			description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."

@@ -26,7 +26,7 @@ type Edit struct {
 func PlanFor(c *config.Config, name string) Plan {
 	id := c.Identities[name]
 	p := Plan{Name: name, AuthorName: id.Name, Email: id.Email, Color: colorOf(id),
-		GHUser: id.GHUser, GHConfigDir: id.GHConfigDir, SSH: SSHNone, MakeDefault: c.Default == name}
+		GHUser: id.GHUser, GHConfigDir: id.GHConfigDir, SSH: SSHNone, MakeDefault: c.Default == name, SigningKey: id.SigningKey}
 	if id.SSHKey != "" {
 		p.SSH, p.SSHKey = SSHExisting, id.SSHKey
 	}
@@ -84,7 +84,17 @@ func (e *Editor) ask(field string, p *Plan) error {
 			func(s string) error { return validateEmail(e.Config, p.Name, s) })
 	case "ssh":
 		e.checkScope(p)
-		err = e.wizard().askSSH(p)
+		before := p.SSHKey
+		if err = e.wizard().askSSH(p); err == nil && before != "" && p.SigningKey == before+".pub" {
+			if p.SSHKey != "" {
+				p.SigningKey = p.SSHKey + ".pub"
+			} else {
+				p.SigningKey, p.UploadSigning = "", false
+			}
+		}
+	case "signing":
+		e.checkScope(p)
+		err = e.askSigning(p)
 	case "github":
 		err = e.askGitHub(p)
 	case "color":
@@ -102,6 +112,53 @@ func (e *Editor) checkScope(p *Plan) {
 	e.scopeChecked = true
 	account, err := e.Verify(p.GHConfigDir)
 	p.NoKeyScope = err != nil || !account.CanAddKeys()
+	p.NoSigningScope = err != nil || !account.CanAddSigningKeys()
+}
+
+func (e *Editor) askSigning(p *Plan) error {
+	var choices []Choice
+	own := ""
+	if p.SSHKey != "" {
+		own = p.SSHKey + ".pub"
+		choices = append(choices, Choice{own, "Sign with this identity's SSH key (" + own + ")"})
+	}
+	for _, key := range existingKeys() {
+		if pub := key + ".pub"; pub != own {
+			choices = append(choices, Choice{pub, "Sign with " + pub})
+		}
+	}
+	if p.SigningKey != "" && !hasChoice(choices, p.SigningKey) {
+		choices = append(choices, Choice{p.SigningKey, "Keep " + p.SigningKey})
+	}
+	choices = append(choices, Choice{"off", "Do not sign commits"})
+	current := p.SigningKey
+	if current == "" {
+		current = "off"
+	}
+	pick, err := e.Prompt.Select("Commit signing", "Signed commits show as Verified on GitHub when the key and the email are on your account.", choices, current)
+	if err != nil {
+		return err
+	}
+	p.UploadSigning = false
+	if pick == "off" {
+		p.SigningKey = ""
+		return nil
+	}
+	p.SigningKey = pick
+	if p.GHUser == "" || p.NoSigningScope || !strings.HasSuffix(pick, ".pub") {
+		return nil
+	}
+	p.UploadSigning, err = e.Prompt.Confirm("Add the key to "+p.GHUser+" on GitHub as a signing key?", "", true)
+	return err
+}
+
+func hasChoice(choices []Choice, key string) bool {
+	for _, c := range choices {
+		if c.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Editor) askGitHub(p *Plan) error {
@@ -127,7 +184,7 @@ func (e *Editor) askGitHub(p *Plan) error {
 		e.Logout(before.GHConfigDir, before.GHUser)
 	}
 	e.scopeChecked = true
-	p.Upload = false
+	p.Upload, p.UploadSigning = false, false
 	return nil
 }
 
@@ -143,6 +200,7 @@ func (e *Editor) menu(p Plan) []Choice {
 	if e.Login != nil {
 		choices = append(choices, row("github", "GitHub", ghLabel(p)))
 	}
+	choices = append(choices, row("signing", "Signing", signingLabel(p)))
 	return append(choices,
 		row("color", "Color", p.Color),
 		row("default", "Default", yesNo(p.MakeDefault)),
@@ -165,6 +223,16 @@ func sshLabel(p Plan) string {
 	return label
 }
 
+func signingLabel(p Plan) string {
+	switch {
+	case p.SigningKey == "":
+		return "off"
+	case p.UploadSigning:
+		return p.SigningKey + ", add to GitHub"
+	}
+	return p.SigningKey
+}
+
 func ghLabel(p Plan) string {
 	if p.GHUser == "" {
 		return "none"
@@ -183,6 +251,7 @@ func changedFields(original, p Plan) []string {
 	add(p.Email != original.Email, "email")
 	add(p.SSH != original.SSH || p.SSHKey != original.SSHKey || p.Upload, "ssh key")
 	add(p.GHConfigDir != original.GHConfigDir || p.GHUser != original.GHUser, "GitHub")
+	add(p.SigningKey != original.SigningKey || p.UploadSigning, "signing")
 	add(p.Color != original.Color, "color")
 	add(p.MakeDefault != original.MakeDefault, "default")
 	return changed

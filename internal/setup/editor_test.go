@@ -45,7 +45,7 @@ func TestEditorChangesSimpleFields(t *testing.T) {
 	for _, c := range f.choices["Edit work"] {
 		labels = append(labels, c.Label)
 	}
-	want := []string{"Author name  Jane Doe", "Email        Jane@Work.example", "SSH key      ~/.ssh/id_w", "Color        magenta", "Default      no", "Done", "Cancel"}
+	want := []string{"Author name  Jane Doe", "Email        Jane@Work.example", "SSH key      ~/.ssh/id_w", "Signing      off", "Color        magenta", "Default      no", "Done", "Cancel"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("menu without gh = %q", labels)
 	}
@@ -164,11 +164,67 @@ func TestEditorCancelLogsOutNewLoginAndRemove(t *testing.T) {
 	}
 }
 
-func hasChoice(choices []Choice, key string) bool {
-	for _, c := range choices {
-		if c.Key == key {
-			return true
-		}
+func TestEditorSigningWithOwnKey(t *testing.T) {
+	sandbox(t)
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Edit work":      {"signing", "ssh", "done"},
+		"Commit signing": {"~/.ssh/id_w.pub"},
+		"Add the key to jane-work on GitHub as a signing key?": {"<default>"},
+		"SSH key":                             {"generate"},
+		"Key passphrase":                      {"no"},
+		"Add the key to jane-work on GitHub?": {"<default>"},
+	}}
+	e := &Editor{Prompt: f, Config: editConfig(),
+		Login:  func(string) (Account, string, error) { return Account{}, "", nil },
+		Verify: func(string) (Account, error) { return Account{Login: "jane-work"}, nil }}
+	edit, err := e.Run("work")
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	p := edit.Plan
+	if p.SigningKey != "~/.ssh/git-idm_work.pub" || !p.UploadSigning || !p.Upload {
+		t.Fatalf("signing must follow the new SSH key: %+v", p)
+	}
+	if got := strings.Join(edit.Changed, ","); got != "ssh key,signing" {
+		t.Fatalf("changed = %s", got)
+	}
+	if label := f.choices["Commit signing"][0].Label; label != "Sign with this identity's SSH key (~/.ssh/id_w.pub)" {
+		t.Fatalf("first choice = %q", label)
+	}
+}
+
+func TestEditorSigningWithoutScopeAndOff(t *testing.T) {
+	sandbox(t)
+	c := editConfig()
+	id := c.Identities["work"]
+	id.SigningKey = "ABCD1234"
+	c.Identities["work"] = id
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Edit work":      {"signing", "signing", "done"},
+		"Commit signing": {"<default>", "~/.ssh/id_w.pub"},
+	}}
+	e := &Editor{Prompt: f, Config: c,
+		Login: func(string) (Account, string, error) { return Account{}, "", nil },
+		Verify: func(string) (Account, error) {
+			return Account{Login: "jane-work", Scopes: []string{"admin:public_key"}}, nil
+		}}
+	edit, err := e.Run("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasChoice(f.choices["Commit signing"], "ABCD1234") {
+		t.Fatalf("a GPG key must stay a choice: %+v", f.choices["Commit signing"])
+	}
+	if p := edit.Plan; p.SigningKey != "~/.ssh/id_w.pub" || p.UploadSigning || !p.NoSigningScope {
+		t.Fatalf("plan = %+v", p)
+	}
+
+	f = &fakePrompter{t: t, answers: map[string][]string{
+		"Edit work":      {"signing", "done"},
+		"Commit signing": {"off"},
+	}}
+	edit, err = (&Editor{Prompt: f, Config: c}).Run("work")
+	if err != nil || edit.Plan.SigningKey != "" || strings.Join(edit.Changed, ",") != "signing" {
+		t.Fatalf("%+v %v", edit, err)
+	}
 }

@@ -63,7 +63,7 @@ func (e *Executor) Check(p Plan) error {
 	if p.SSH == SSHGenerate && e.Tools.SSHKeygen == "" {
 		return fmt.Errorf("ssh-keygen is not installed")
 	}
-	if p.Upload && e.Tools.GH == "" {
+	if (p.Upload || p.UploadSigning) && e.Tools.GH == "" {
 		return fmt.Errorf("gh is not installed (https://cli.github.com)")
 	}
 	return nil
@@ -97,10 +97,17 @@ func (e *Executor) Run(p Plan) (config.Identity, *Report, error) {
 		}
 	}
 	if p.Upload {
-		if err := e.uploadKey(p, id.GHConfigDir); err != nil {
+		if err := e.uploadKey(p.SSHKey+".pub", "git-idm "+p.Name, id.GHConfigDir); err != nil {
 			return fail("add ssh key to GitHub", err)
 		}
 		e.step(r, "added %s.pub to GitHub", p.SSHKey)
+	}
+	id.SigningKey = p.SigningKey
+	if p.UploadSigning {
+		if err := e.uploadKey(p.SigningKey, "git-idm "+p.Name+" signing", id.GHConfigDir, "--type", "signing"); err != nil {
+			return fail("add signing key to GitHub", err)
+		}
+		e.step(r, "added %s to GitHub as a signing key", p.SigningKey)
 	}
 	if p.CreateDir {
 		if err := os.MkdirAll(config.ExpandHome(p.BindDir), 0o755); err != nil {
@@ -184,7 +191,7 @@ func (e *Executor) loginInto(dir, protocol string) (Account, error) {
 	}
 	defer os.RemoveAll(scratch)
 	cmd := exec.Command(e.Tools.GH, "auth", "login", "--hostname", "github.com", "--web", "--clipboard",
-		"--skip-ssh-key", "--git-protocol", protocol, "--scopes", "admin:public_key")
+		"--skip-ssh-key", "--git-protocol", protocol, "--scopes", "admin:public_key,admin:ssh_signing_key")
 	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+dir, "GIT_CONFIG_GLOBAL="+filepath.Join(scratch, "gitconfig"))
 	cmd.Stdin = strings.NewReader("")
 	pipe, err := cmd.StderrPipe()
@@ -267,12 +274,12 @@ func (e *Executor) gh(dir string, args ...string) error {
 	return nil
 }
 
-func (e *Executor) uploadKey(p Plan, ghDir string) error {
-	title := "git-idm " + p.Name
+func (e *Executor) uploadKey(pub, title, ghDir string, extra ...string) error {
 	if e.Hostname != "" {
 		title += " (" + e.Hostname + ")"
 	}
-	cmd := exec.Command(e.Tools.GH, "ssh-key", "add", config.ExpandHome(p.SSHKey)+".pub", "--title", title)
+	args := append([]string{"ssh-key", "add", config.ExpandHome(pub), "--title", title}, extra...)
+	cmd := exec.Command(e.Tools.GH, args...)
 	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+config.ExpandHome(ghDir))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

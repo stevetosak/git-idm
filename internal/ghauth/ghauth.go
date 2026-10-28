@@ -33,6 +33,10 @@ func (a Account) CanAddKeys() bool {
 	return a.Scopes == nil || slices.Contains(a.Scopes, "admin:public_key") || slices.Contains(a.Scopes, "write:public_key")
 }
 
+func (a Account) CanAddSigningKeys() bool {
+	return a.Scopes == nil || slices.Contains(a.Scopes, "admin:ssh_signing_key") || slices.Contains(a.Scopes, "write:ssh_signing_key")
+}
+
 func Fetch(gh, dir string) (Account, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()

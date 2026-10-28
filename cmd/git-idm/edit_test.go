@@ -53,7 +53,7 @@ func TestEditMenuEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := runEdit(t, []string{"4", "3", "5", "n", "6"}, "work")
+	out := runEdit(t, []string{"5", "3", "6", "n", "7"}, "work")
 	if !strings.Contains(out, "updated work: color, default") {
 		t.Fatalf("out:\n%s", out)
 	}
@@ -66,10 +66,10 @@ func TestEditMenuEndToEnd(t *testing.T) {
 		t.Fatalf("the edit must apply the git config:\n%s", generated)
 	}
 
-	if out := runEdit(t, []string{"7"}, "work"); !strings.Contains(out, "nothing was changed") {
+	if out := runEdit(t, []string{"8"}, "work"); !strings.Contains(out, "nothing was changed") {
 		t.Fatalf("cancel:\n%s", out)
 	}
-	if out := runEdit(t, []string{"6"}, "work"); !strings.Contains(out, "nothing was changed") {
+	if out := runEdit(t, []string{"7"}, "work"); !strings.Contains(out, "nothing was changed") {
 		t.Fatalf("done without changes:\n%s", out)
 	}
 }
@@ -102,7 +102,7 @@ func TestEditMenuSwitchesLoginAndAddsKey(t *testing.T) {
 		"1", // generate
 		"1", // no passphrase
 		"",  // add the key to jane: yes
-		"7", // Done
+		"8", // Done
 	}
 	root := newRootCmd()
 	var out bytes.Buffer
