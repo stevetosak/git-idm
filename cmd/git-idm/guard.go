@@ -147,11 +147,16 @@ func printMismatch(w io.Writer, c *config.Config, res resolve.Result, v guard.Ve
 	fmt.Fprintf(w, "  author:   %s  (from %s)\n", v.Actual, from)
 	fmt.Fprintf(w, "  expected: %s <%s>  (%s)\n", v.ExpectedFrom, v.Expected, reason(res))
 	fmt.Fprintln(w, "  fix one of:")
+	fix := func(command, text string) { fmt.Fprintf(w, "    %-42s %s\n", command, text) }
 	if from == "this repo's .git/config" {
-		fmt.Fprintln(w, "    git config --local --unset user.email   use the git-idm identity")
+		if res.Rule != nil {
+			fix("git-idm migrate", "remove author keys from repo configs under rules")
+		} else {
+			fix("git config --local --unset-all user.email", "use the git-idm identity")
+		}
 	}
-	fmt.Fprintln(w, "    git-idm allow                           accept this author in this repo")
-	fmt.Fprintln(w, "    git commit --no-verify                  skip the check once")
+	fix("git-idm allow", "accept this author in this repo")
+	fix("git commit --no-verify", "skip the check once")
 }
 
 func globalHooksPathOutsideBlock() string {
