@@ -149,7 +149,7 @@ func (s *scanner) read(root, config string) (Repo, bool) {
 			repo.Keys = append(repo.Keys, Key{Name: name, Values: v})
 		}
 	}
-	return repo, repo.Overrides()
+	return repo, true
 }
 
 func configPath(dir string) string {

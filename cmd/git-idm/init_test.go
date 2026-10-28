@@ -179,3 +179,51 @@ func TestWelcomeSuggestsInitForAnOldSetup(t *testing.T) {
 		}
 	}
 }
+
+func TestInitScanFindsRepoAuthors(t *testing.T) {
+	initHome(t)
+	extra, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(extra, "client", "api")
+	os.MkdirAll(repo, 0o755)
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "Martin"}, {"config", "user.email", "martin@codechem.com"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"init", "--write", "--scan", extra})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	c, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Identities["codechem"].Email != "martin@codechem.com" {
+		t.Fatalf("identities = %v\n%s", c.Names(), out.String())
+	}
+	found := false
+	for _, r := range c.Rules {
+		found = found || (r.Path == repo+"/" && r.Identity == "codechem")
+	}
+	if !found {
+		t.Fatalf("rules = %+v", c.Rules)
+	}
+
+	root = newRootCmd()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"init", "--scan", filepath.Join(extra, "missing")})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "not a folder") {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -35,6 +35,8 @@ type Result struct {
 
 type Options struct {
 	DefaultName string
+	Scan        []string
+	Exclude     []string
 }
 
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
@@ -56,6 +58,9 @@ func Import(opts Options) (*Result, error) {
 	}
 	for _, inc := range global.includeIfs() {
 		res.importInclude(global, inc)
+	}
+	if len(opts.Scan) > 0 {
+		res.importRepos(global, opts)
 	}
 	if err := res.Config.Validate(); err != nil {
 		return nil, fmt.Errorf("imported config is not valid: %w", err)

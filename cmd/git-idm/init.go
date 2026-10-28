@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,20 +20,27 @@ import (
 func newInitCmd() *cobra.Command {
 	var write, force bool
 	var defaultName string
+	var scan []string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Import your current git, SSH and gh setup",
 		Long: "Read your current git, SSH and gh setup and turn it into git-idm identities.\n" +
+			"init also reads the git repos in your home folder (and in --scan folders): repos that set their\n" +
+			"own author become identities and folder rules.\n" +
 			"In a terminal, init shows each identity it found and asks what to keep. Without a terminal,\n" +
 			"init only prints the result; --write then saves the config file.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().NFlag() == 0 {
+			opts, err := importOptions(defaultName, scan)
+			if err != nil {
+				return err
+			}
+			if !write && !force {
 				if prompter, err := newPrompter(cmd); err == nil {
-					return runInitReview(cmd, prompter, defaultName)
+					return runInitReview(cmd, prompter, opts)
 				}
 			}
-			res, err := importer.Import(importer.Options{DefaultName: defaultName})
+			res, err := importer.Import(opts)
 			if err != nil {
 				return err
 			}
@@ -61,7 +69,28 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&write, "write", false, "save the imported config")
 	cmd.Flags().BoolVar(&force, "force", false, "replace an existing config")
 	cmd.Flags().StringVar(&defaultName, "default-name", "work", "name for the identity from your global gitconfig")
+	cmd.Flags().StringArrayVar(&scan, "scan", nil, "also read git repos in this folder (repeatable)")
 	return cmd
+}
+
+func importOptions(defaultName string, scan []string) (importer.Options, error) {
+	roots, exclude := importer.HomeScan()
+	for _, dir := range scan {
+		path := config.ExpandHome(strings.TrimSpace(dir))
+		if !filepath.IsAbs(path) {
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return importer.Options{}, fmt.Errorf("--scan %q: %w", dir, err)
+			}
+			path = abs
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			return importer.Options{}, fmt.Errorf("--scan %q: not a folder", dir)
+		}
+		roots = append(roots, filepath.Clean(path))
+	}
+	return importer.Options{DefaultName: defaultName, Scan: roots, Exclude: exclude}, nil
 }
 
 func printImport(out io.Writer, res *importer.Result) error {
@@ -89,7 +118,7 @@ func printImport(out io.Writer, res *importer.Result) error {
 	return nil
 }
 
-func runInitReview(cmd *cobra.Command, prompter setup.Prompter, defaultName string) error {
+func runInitReview(cmd *cobra.Command, prompter setup.Prompter, opts importer.Options) error {
 	out := cmd.OutOrStdout()
 	path, err := config.Path()
 	if err != nil {
@@ -99,7 +128,7 @@ func runInitReview(cmd *cobra.Command, prompter setup.Prompter, defaultName stri
 		fmt.Fprintf(out, "git-idm is already set up (%s).\nAdd an identity with: git-idm add\n", config.ContractHome(path))
 		return nil
 	}
-	res, err := importer.Import(importer.Options{DefaultName: defaultName})
+	res, err := importer.Import(opts)
 	if err != nil {
 		return err
 	}

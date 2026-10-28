@@ -70,7 +70,7 @@ func TestScanFindsLocalKeys(t *testing.T) {
 		t.Fatal("scan was truncated")
 	}
 	got := strings.Join(roots(res, root), ",")
-	want := strings.Join([]string{"a/b/c/at-limit", "allowed", "api", "api/lib/nested"}, ",")
+	want := strings.Join([]string{"a/b/c/at-limit", "allowed", "api", "api/lib/nested", "clean"}, ",")
 	if got != want {
 		t.Fatalf("repos = %s, want %s", got, want)
 	}
@@ -90,6 +90,9 @@ func TestScanFindsLocalKeys(t *testing.T) {
 	}
 	if res.Repos[3].Value("user.signingkey") != "ABC123" || res.Repos[3].Count("user.email") != 0 {
 		t.Errorf("nested keys = %+v", res.Repos[3].Keys)
+	}
+	if res.Repos[4].Overrides() {
+		t.Errorf("clean repo keys = %+v", res.Repos[4].Keys)
 	}
 }
 
