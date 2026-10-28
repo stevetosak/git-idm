@@ -28,6 +28,8 @@ type Legacy struct {
 	RulePath  string
 	Config    string
 	Keys      []string
+	Summary   string
+	Author    string
 }
 
 type Result struct {

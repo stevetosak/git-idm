@@ -46,17 +46,22 @@ func LocalLegacy(c *config.Config, repos []localid.Repo) []Legacy {
 		if len(keys) == 0 {
 			continue
 		}
+		summary := strings.Join(parts, ", ")
 		effect := " (" + rule.Identity + " sets them)"
+		author := ""
 		if email != "" && !strings.EqualFold(email, id.Email) {
+			author = email
 			effect = fmt.Sprintf(", author %s becomes %s (%s)", email, id.Email, rule.Identity)
 		}
 		out = append(out, Legacy{
 			Kind:     LegacyLocal,
 			Path:     config.ContractHome(repo.Root),
-			Detail:   "remove " + strings.Join(parts, ", ") + effect,
+			Detail:   "remove " + summary + effect,
 			RulePath: rule.Path,
 			Config:   repo.Config,
 			Keys:     keys,
+			Summary:  summary,
+			Author:   author,
 		})
 	}
 	return out

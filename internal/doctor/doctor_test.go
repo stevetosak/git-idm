@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -181,5 +182,49 @@ func TestDoctorChecksTokens(t *testing.T) {
 	}
 	if calls["gh"] != 1 || len(calls) != 5 {
 		t.Errorf("each gh folder must be checked once: %v", calls)
+	}
+}
+
+func gitRepo(t *testing.T, dir string, keys ...string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	args := [][]string{{"init", "-q"}}
+	for i := 0; i+1 < len(keys); i += 2 {
+		args = append(args, []string{"config", "--local", "--add", keys[i], keys[i+1]})
+	}
+	for _, a := range args {
+		cmd := exec.Command("git", a...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+}
+
+func TestDoctorFindsLocalKeysUnderRules(t *testing.T) {
+	home, c, a := setup(t)
+	c.Rules = []config.Rule{{Path: "~/Projects/", Identity: "work"}}
+	other := filepath.Join(home, "Projects", "other")
+	gitRepo(t, other, "user.name", "Martin", "user.name", "Martin", "user.email", "martin@old.example")
+	gitRepo(t, filepath.Join(home, "Projects", "named"), "user.name", "W2")
+	gitRepo(t, filepath.Join(home, "Projects", "allowed"), "user.email", "bot@ci.example", "git-idm.allowAuthor", "bot@ci.example")
+	gitRepo(t, filepath.Join(home, "outside"), "user.email", "martin@old.example")
+
+	res := resolve.Result{Identity: "work", Source: resolve.SourceRule, RepoRoot: other, LocalEmail: "martin@old.example"}
+	checks := Run(c, a, res, Env{Getenv: func(string) string { return "" }})
+
+	ch := find(checks, "~/Projects/other: .git/config sets user.name (2×), user.email, commits use martin@old.example, not w@x.example")
+	if ch == nil || ch.Level != Warn || !strings.Contains(ch.Fix, "git-idm migrate") {
+		t.Errorf("other: got %+v", ch)
+	}
+	if ch := find(checks, "~/Projects/named: .git/config sets user.name over the work rule"); ch == nil || ch.Fix != "git-idm migrate" {
+		t.Errorf("named: got %+v", ch)
+	}
+	for _, substr := range []string{"~/Projects/allowed", "~/outside", "sets author"} {
+		if ch := find(checks, substr); ch != nil {
+			t.Errorf("%q must not be reported: %+v", substr, ch)
+		}
 	}
 }

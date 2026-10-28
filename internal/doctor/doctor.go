@@ -94,10 +94,40 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	if res.Source == resolve.SourceOverride {
 		add(Info, "git-idm use --clear", "override is active in this shell: %s", res.Identity)
 	}
+	local := localChecks(c)
+	checks = append(checks, local...)
 	if res.RepoRoot != "" {
-		checks = append(checks, repoChecks(c, res)...)
+		checks = append(checks, repoChecks(c, res, local)...)
 	}
 	return checks
+}
+
+func localChecks(c *config.Config) []Check {
+	scan := importer.ScanRules(c.Rules)
+	var checks []Check
+	if scan.Truncated {
+		checks = append(checks, Check{Level: Info, Text: "repo scan stopped early, some repos under rules were not checked"})
+	}
+	for _, l := range importer.LocalLegacy(c, scan.Repos) {
+		rule := c.Identities[ruleIdentity(c, l.RulePath)]
+		text := fmt.Sprintf("%s: .git/config sets %s over the %s rule", l.Path, l.Summary, ruleIdentity(c, l.RulePath))
+		fix := "git-idm migrate"
+		if l.Author != "" {
+			text = fmt.Sprintf("%s: .git/config sets %s, commits use %s, not %s", l.Path, l.Summary, l.Author, rule.Email)
+			fix = "git-idm migrate, or git-idm allow in the repo (if on purpose)"
+		}
+		checks = append(checks, Check{Level: Warn, Text: text, Fix: fix})
+	}
+	return checks
+}
+
+func ruleIdentity(c *config.Config, path string) string {
+	for _, r := range c.Rules {
+		if r.Path == path {
+			return r.Identity
+		}
+	}
+	return ""
 }
 
 func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult) []Check {
@@ -194,11 +224,15 @@ func guardChecks(c *config.Config, a *gitgen.Applier, global string) []Check {
 	return checks
 }
 
-func repoChecks(c *config.Config, res resolve.Result) []Check {
+func repoChecks(c *config.Config, res resolve.Result, local []Check) []Check {
 	var checks []Check
 	repo := config.ContractHome(res.RepoRoot)
 	expected := c.Identities[res.Identity].Email
-	if res.LocalEmail != "" && !strings.EqualFold(res.LocalEmail, expected) {
+	reported := false
+	for _, ch := range local {
+		reported = reported || strings.HasPrefix(ch.Text, repo+": ")
+	}
+	if res.LocalEmail != "" && !strings.EqualFold(res.LocalEmail, expected) && !reported {
 		if strings.EqualFold(guard.Allowed(res.RepoRoot), res.LocalEmail) {
 			checks = append(checks, Check{Level: OK, Text: fmt.Sprintf("%s: author %s is accepted on purpose", repo, res.LocalEmail)})
 		} else {
