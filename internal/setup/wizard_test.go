@@ -278,7 +278,13 @@ func TestWizardBrowseDirectories(t *testing.T) {
 		}
 		return strings.Join(l, " | ")
 	}
+	if rec.defaults[0] != "skip" || rec.defaults[4] != "dir:a" {
+		t.Errorf("cursor must start on skip at home and on the first folder elsewhere, got %v", rec.defaults)
+	}
 	homeView := labels(history[0])
+	if strings.Contains(homeView, "✓ Use ~") || !strings.Contains(homeView, "★ Use as the default (every folder without an identity), replaces work") {
+		t.Errorf("home must offer default, not a ~/ rule: %s", homeView)
+	}
 	if !strings.Contains(homeView, "Projects/ 2 repos") || !strings.Contains(homeView, "Work/ bound to work") ||
 		strings.Contains(homeView, ".hidden") || strings.Contains(homeView, "Library") {
 		t.Fatalf("home view: %s", homeView)
@@ -305,12 +311,14 @@ type recordingPrompter struct {
 	*fakePrompter
 	onSelect     func([]Choice)
 	descriptions []string
+	defaults     []string
 }
 
 func (r *recordingPrompter) Select(title, description string, choices []Choice, value string) (string, error) {
 	if strings.HasPrefix(title, "Directory for") {
 		r.onSelect(choices)
 		r.descriptions = append(r.descriptions, description)
+		r.defaults = append(r.defaults, value)
 	}
 	return r.fakePrompter.Select(title, description, choices, value)
 }
@@ -351,8 +359,36 @@ func TestWizardOrderAuthorEmailNameFirst(t *testing.T) {
 	if p.Name != "acme" {
 		t.Fatalf("name = %q", p.Name)
 	}
-	want := []string{"Author name", "Email", "Identity name", "GitHub account", "SSH key", "Directory for acme", "Prompt color", "Summary", "Create this identity?"}
+	want := []string{"Author name", "Email", "Identity name", "Directory for acme", "GitHub account", "SSH key", "Prompt color", "Summary", "Create this identity?"}
 	if strings.Join(f.asked, ",") != strings.Join(want, ",") {
 		t.Fatalf("order:\n got  %v\n want %v", f.asked, want)
+	}
+}
+
+func TestWizardHomeMeansDefault(t *testing.T) {
+	sandbox(t)
+	for _, pick := range []struct{ dir, typed string }{{"default", ""}, {"type", "~"}} {
+		answers := map[string][]string{
+			"Author name":           {"Jane"},
+			"Email":                 {"jane@d.example"},
+			"Directory for d":       {pick.dir},
+			"SSH key":               {"none"},
+			"Prompt color":          {"<default>"},
+			"Create this identity?": {"yes"},
+		}
+		if pick.typed != "" {
+			answers["Directory path"] = []string{pick.typed}
+		}
+		f := &fakePrompter{t: t, answers: answers}
+		p, err := (&Wizard{Prompt: f, Config: existing(), DefaultName: "d"}).Run()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !p.MakeDefault || p.BindDir != "" {
+			t.Fatalf("%s: plan = %+v", pick.dir, p)
+		}
+		if !strings.Contains(p.Summary(), "default for every folder without an identity") {
+			t.Errorf("summary: %s", p.Summary())
+		}
 	}
 }

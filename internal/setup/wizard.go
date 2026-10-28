@@ -38,6 +38,7 @@ type Plan struct {
 	Upload      bool
 	BindDir     string
 	CreateDir   bool
+	MakeDefault bool
 }
 
 type Wizard struct {
@@ -73,13 +74,13 @@ func (w *Wizard) run() (Plan, error) {
 	if p.Name, err = w.askName(p.Email); err != nil {
 		return p, err
 	}
+	if err := w.askDir(&p); err != nil {
+		return p, err
+	}
 	if err := w.askGitHub(&p); err != nil {
 		return p, err
 	}
 	if err := w.askSSH(&p); err != nil {
-		return p, err
-	}
-	if err := w.askDir(&p); err != nil {
 		return p, err
 	}
 	if p.Color, err = w.Prompt.Select("Prompt color", "The color of this identity in your shell prompt.", w.colorOptions(), w.unusedColor()); err != nil {
@@ -229,7 +230,7 @@ func (w *Wizard) askDir(p *Plan) error {
 	title := "Directory for " + p.Name
 	problem := ""
 	for {
-		description := "Every repo under it uses " + p.Name + ". Enter opens a folder, / searches.\nNow in: " + config.ContractHome(cur)
+		description := "Every repo under the folder uses " + p.Name + ". Enter opens a folder, / searches.\nNow in: " + config.ContractHome(cur)
 		if note := w.insideRule(cur); note != "" {
 			description += "\n" + note
 		}
@@ -237,12 +238,15 @@ func (w *Wizard) askDir(p *Plan) error {
 			description += "\n✗ " + problem
 			problem = ""
 		}
-		choices, first := w.dirChoices(cur)
+		choices, first := w.dirChoices(cur, cur == home)
 		pick, err := w.Prompt.Select(title, description, choices, first)
 		if err != nil {
 			return err
 		}
 		switch {
+		case pick == "default":
+			p.MakeDefault = true
+			return nil
 		case pick == "use":
 			if err := w.validateDir(cur); err != nil {
 				problem = err.Error()
@@ -278,17 +282,26 @@ func (w *Wizard) askDir(p *Plan) error {
 	}
 }
 
-func (w *Wizard) dirChoices(cur string) ([]Choice, string) {
-	choices := []Choice{
-		{"use", "✓ Use " + config.ContractHome(cur)},
-		{"new", "+ New folder here…"},
-		{"type", "✎ Type a path…"},
-		{"skip", "⨯ Skip (bind later)"},
+func (w *Wizard) dirChoices(cur string, atHome bool) ([]Choice, string) {
+	choices := []Choice{{"skip", "⨯ Skip (use it nowhere for now)"}}
+	first := "use"
+	if atHome {
+		label := "★ Use as the default (every folder without an identity)"
+		if w.Config.Default != "" {
+			label += ", replaces " + w.Config.Default
+		}
+		choices = append(choices, Choice{"default", label})
+		first = "skip"
+	} else {
+		choices = append(choices, Choice{"use", "✓ Use " + config.ContractHome(cur)})
 	}
+	choices = append(choices,
+		Choice{"new", "+ New folder here…"},
+		Choice{"type", "✎ Type a path…"},
+	)
 	if filepath.Dir(cur) != cur {
 		choices = append(choices, Choice{"up", "↑ .."})
 	}
-	first := "use"
 	for _, e := range subdirs(cur) {
 		if first == "use" {
 			first = "dir:" + e
@@ -373,6 +386,10 @@ func (w *Wizard) typeDir(p *Plan) error {
 	dir, err := w.Prompt.Input("Directory path", "Every repo under this directory uses "+p.Name+". Leave empty to skip.", "", validate)
 	if err != nil || dir == "" {
 		return err
+	}
+	if dirRulePath(dir) == "~/" {
+		p.MakeDefault = true
+		return nil
 	}
 	p.BindDir = dirRulePath(dir)
 	if !fileExists(config.ExpandHome(p.BindDir)) {
@@ -461,14 +478,17 @@ func (p Plan) Summary() string {
 	if p.Upload {
 		fmt.Fprintf(&b, "       added to GitHub\n")
 	}
-	if p.BindDir != "" {
+	switch {
+	case p.MakeDefault:
+		fmt.Fprintf(&b, "dir    default for every folder without an identity\n")
+	case p.BindDir != "":
 		created := ""
 		if p.CreateDir {
 			created = " (created)"
 		}
 		fmt.Fprintf(&b, "dir    %s%s\n", p.BindDir, created)
-	} else {
-		fmt.Fprintf(&b, "dir    none (bind later: git-idm bind %s <dir>)\n", p.Name)
+	default:
+		fmt.Fprintf(&b, "dir    none, used nowhere (later: git-idm bind %s <dir>)\n", p.Name)
 	}
 	fmt.Fprintf(&b, "color  %s", p.Color)
 	return b.String()

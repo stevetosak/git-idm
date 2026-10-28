@@ -62,7 +62,7 @@ func newAddCmd() *cobra.Command {
 			id.SSHKey = config.ContractHome(id.SSHKey)
 			id.GHConfigDir = config.ContractHome(id.GHConfigDir)
 			c.Identities[name] = id
-			if makeDefault || c.Default == "" {
+			if makeDefault {
 				c.Default = name
 			}
 			if err := c.Save(); err != nil {

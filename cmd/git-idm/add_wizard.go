@@ -70,7 +70,7 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 		return err
 	}
 	c.Identities[plan.Name] = id
-	if c.Default == "" {
+	if plan.MakeDefault {
 		c.Default = plan.Name
 	}
 	if plan.BindDir != "" {
@@ -89,8 +89,13 @@ func runAddWizard(cmd *cobra.Command, c *config.Config, name string) error {
 		testConnection(out, ex, id)
 	}
 	fmt.Fprintf(out, "\nDone.")
-	if plan.BindDir != "" {
+	switch {
+	case plan.MakeDefault:
+		fmt.Fprintf(out, " %s is now the default for every folder without an identity.", plan.Name)
+	case plan.BindDir != "":
 		fmt.Fprintf(out, " Repos under %s now use %s.", plan.BindDir, plan.Name)
+	default:
+		fmt.Fprintf(out, " %s is used nowhere yet. Bind it with: git-idm bind %s <dir>.", plan.Name, plan.Name)
 	}
 	fmt.Fprintln(out, " Check any time with: git-idm")
 	return nil
