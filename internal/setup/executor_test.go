@@ -28,7 +28,7 @@ case "$1 $2" in
     rm -f "$GH_CONFIG_DIR/hosts.yml"
     ;;
   "ssh-key add")
-    case "$*" in *signing*) [ -n "$FAKE_DUPLICATE" ] && { echo "key is already in use" >&2; exit 1; } ;; esac
+    if [ -n "$FAKE_DUPLICATE" ]; then echo "key is already in use" >&2; exit 1; fi
     ;;
 esac
 `
@@ -63,7 +63,7 @@ func TestExecutorLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if account.Login != "fake-user" || account.Name != "Fake User" || account.NoReplyEmail() != "7+fake-user@users.noreply.github.com" {
+	if account.Login != "fake-user" || account.ID != 7 {
 		t.Fatalf("account = %+v", account)
 	}
 	if dir != "~/.config/git-idm/gh/client" {
@@ -71,7 +71,7 @@ func TestExecutorLogin(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(log)
 	login := strings.Split(string(calls), "\n")[0]
-	for _, want := range []string{"auth login", "--web", "--clipboard", "--skip-ssh-key", "--scopes admin:public_key,admin:ssh_signing_key",
+	for _, want := range []string{"auth login", "--web", "--clipboard", "--skip-ssh-key", "--scopes admin:public_key",
 		"GH_CONFIG_DIR=" + filepath.Join(home, ".config", "git-idm", "gh", "client"), "stdin=notty"} {
 		if !strings.Contains(login, want) {
 			t.Errorf("login call misses %q: %s", want, login)
@@ -117,13 +117,12 @@ func TestExecutorLoginFailureCleansUp(t *testing.T) {
 func TestExecutorFullPlan(t *testing.T) {
 	home := sandbox(t)
 	tools, log := fakeTools(t, home)
-	t.Setenv("FAKE_DUPLICATE", "1")
 	var out bytes.Buffer
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Hostname: "mac", Out: &out}
 	p := Plan{
 		Name: "client", AuthorName: "Jane", Email: "jane@client.example", Color: "green",
 		GHUser: "fake-user", GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
-		Upload: true, Sign: true, BindDir: "~/Clients/", CreateDir: true,
+		Upload: true, BindDir: "~/Clients/", CreateDir: true,
 	}
 	id, report, err := ex.Run(p)
 	if err != nil {
@@ -143,26 +142,23 @@ func TestExecutorFullPlan(t *testing.T) {
 		t.Fatal("directory not created")
 	}
 	if id.GHUser != "fake-user" || id.GHConfigDir != "~/.config/git-idm/gh/client" || id.SSHKey != "~/.ssh/git-idm_client" ||
-		id.SigningKey != "~/.ssh/git-idm_client.pub" || id.Protocol != "ssh" || id.Email != "jane@client.example" {
+		id.SigningKey != "" || id.Protocol != "ssh" || id.Email != "jane@client.example" {
 		t.Fatalf("identity = %+v", id)
 	}
-	if len(report.Done) != 4 {
+	if len(report.Done) != 3 {
 		t.Fatalf("report = %+v", report.Done)
 	}
 
 	calls, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
-	if len(lines) != 3 {
+	if len(lines) != 2 {
 		t.Fatalf("gh calls:\n%s", calls)
 	}
 	if !strings.Contains(lines[0], "config set --host github.com git_protocol ssh") {
 		t.Errorf("protocol call: %s", lines[0])
 	}
-	if !strings.Contains(lines[1], "--type authentication") || !strings.Contains(lines[1], "--title git-idm client (mac)") {
+	if !strings.Contains(lines[1], "ssh-key add") || !strings.Contains(lines[1], "--title git-idm client (mac)") || strings.Contains(lines[1], "signing") {
 		t.Errorf("upload call: %s", lines[1])
-	}
-	if !strings.Contains(lines[2], "--type signing") {
-		t.Errorf("signing upload call: %s", lines[2])
 	}
 
 	login, err := ex.TestConnection(id)
@@ -197,5 +193,16 @@ func TestExecutorCheckMissingTools(t *testing.T) {
 	}
 	if err := ex.Check(Plan{SSH: SSHGenerate}); err == nil {
 		t.Fatal("want error for missing ssh-keygen")
+	}
+}
+
+func TestExecutorKeyAlreadyOnGitHubIsFine(t *testing.T) {
+	home := sandbox(t)
+	tools, _ := fakeTools(t, home)
+	t.Setenv("FAKE_DUPLICATE", "1")
+	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &bytes.Buffer{}}
+	p := Plan{Name: "d", AuthorName: "J", Email: "j@d.example", GHUser: "u", GHConfigDir: "~/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_d", Upload: true}
+	if _, _, err := ex.Run(p); err != nil {
+		t.Fatal(err)
 	}
 }

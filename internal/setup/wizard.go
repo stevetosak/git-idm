@@ -5,6 +5,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -21,13 +22,7 @@ const (
 
 type Account struct {
 	Login string `json:"login"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
 	ID    int64  `json:"id"`
-}
-
-func (a Account) NoReplyEmail() string {
-	return fmt.Sprintf("%d+%s@users.noreply.github.com", a.ID, a.Login)
 }
 
 type Plan struct {
@@ -41,7 +36,6 @@ type Plan struct {
 	SSHKey      string
 	Passphrase  bool
 	Upload      bool
-	Sign        bool
 	BindDir     string
 	CreateDir   bool
 }
@@ -54,6 +48,8 @@ type Wizard struct {
 	Login       func(name string) (Account, string, error)
 	Logout      func(dir, user string)
 }
+
+var nonNameChars = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 var colorChoices = []string{"cyan", "green", "magenta", "yellow", "blue", "red", "white"}
 
@@ -68,23 +64,16 @@ func (w *Wizard) Run() (Plan, error) {
 func (w *Wizard) run() (Plan, error) {
 	var p Plan
 	var err error
-	if p.Name, err = w.askName(); err != nil {
+	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", w.DefaultUser, required("author name")); err != nil {
 		return p, err
 	}
-	account, err := w.askGitHub(&p)
-	if err != nil {
+	if p.Email, err = w.Prompt.Input("Email", "The email on your commits. GitHub uses it to link commits to your account.", "", w.validateEmail); err != nil {
 		return p, err
 	}
-	if p.AuthorName, err = w.Prompt.Input("Author name", "The name on your commits.", firstNonEmpty(account.Name, w.DefaultUser), required("author name")); err != nil {
+	if p.Name, err = w.askName(p.Email); err != nil {
 		return p, err
 	}
-	emailHelp := "The email on your commits. GitHub uses it to link commits to your account."
-	emailDefault := ""
-	if account.Login != "" {
-		emailDefault = firstNonEmpty(account.Email, account.NoReplyEmail())
-		emailHelp += "\n" + account.NoReplyEmail() + " keeps your real email private."
-	}
-	if p.Email, err = w.Prompt.Input("Email", emailHelp, emailDefault, w.validateEmail); err != nil {
+	if err := w.askGitHub(&p); err != nil {
 		return p, err
 	}
 	if err := w.askSSH(&p); err != nil {
@@ -109,27 +98,27 @@ func (w *Wizard) run() (Plan, error) {
 	return p, nil
 }
 
-func (w *Wizard) askGitHub(p *Plan) (Account, error) {
+func (w *Wizard) askGitHub(p *Plan) error {
 	if w.Login == nil {
-		return Account{}, nil
+		return nil
 	}
 	description := "Your browser opens now. git-idm keeps this login separate from your other gh accounts."
 	for {
 		pick, err := w.Prompt.Select("GitHub account", description,
 			[]Choice{{"login", "Log in now (opens the browser)"}, {"skip", "Skip"}}, "login")
 		if err != nil || pick == "skip" {
-			return Account{}, err
+			return err
 		}
 		account, dir, err := w.Login(p.Name)
 		if err == nil {
 			p.GHUser, p.GHConfigDir = account.Login, dir
-			return account, nil
+			return nil
 		}
 		description = "Login failed: " + err.Error() + "\nTry again, or skip and log in later."
 	}
 }
 
-func (w *Wizard) askName() (string, error) {
+func (w *Wizard) askName(email string) (string, error) {
 	validate := func(s string) error {
 		if err := config.ValidateIdentityName(s); err != nil {
 			return fmt.Errorf("use 1-32 characters: a-z, 0-9, - or _")
@@ -142,7 +131,43 @@ func (w *Wizard) askName() (string, error) {
 	if w.DefaultName != "" && validate(w.DefaultName) == nil {
 		return w.DefaultName, nil
 	}
-	return w.Prompt.Input("Identity name", "A short name, used in the prompt and in commands. Example: client", w.DefaultName, validate)
+	suggestion := w.DefaultName
+	if suggestion == "" {
+		suggestion = SuggestName(email)
+	}
+	if validate(suggestion) != nil {
+		suggestion = ""
+	}
+	return w.Prompt.Input("Identity name", "A short name, used in the prompt and in commands. Example: client", suggestion, validate)
+}
+
+var personalMailDomains = map[string]bool{
+	"gmail": true, "googlemail": true, "outlook": true, "hotmail": true, "live": true, "yahoo": true,
+	"icloud": true, "me": true, "mac": true, "proton": true, "protonmail": true, "pm": true,
+	"gmx": true, "aol": true, "fastmail": true, "hey": true, "zoho": true, "yandex": true, "noreply": true,
+}
+
+func SuggestName(email string) string {
+	_, domain, ok := strings.Cut(strings.ToLower(email), "@")
+	if !ok {
+		return ""
+	}
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return ""
+	}
+	name := labels[len(labels)-2]
+	if len(labels) >= 3 && len(name) <= 3 && !personalMailDomains[name] {
+		name = labels[len(labels)-3]
+	}
+	if strings.HasSuffix(domain, "users.noreply.github.com") || personalMailDomains[name] {
+		return "personal"
+	}
+	name = strings.Trim(nonNameChars.ReplaceAllString(name, "-"), "-")
+	if config.ValidateIdentityName(name) != nil {
+		return ""
+	}
+	return name
 }
 
 func (w *Wizard) validateEmail(s string) error {
@@ -192,8 +217,7 @@ func (w *Wizard) askSSH(p *Plan) error {
 			return err
 		}
 	}
-	p.Sign, err = w.Prompt.Confirm("Sign commits with this key?", "GitHub then shows your commits as Verified.", false)
-	return err
+	return nil
 }
 
 func (w *Wizard) askDir(p *Plan) error {
@@ -436,9 +460,6 @@ func (p Plan) Summary() string {
 	}
 	if p.Upload {
 		fmt.Fprintf(&b, "       added to GitHub\n")
-	}
-	if p.Sign {
-		fmt.Fprintf(&b, "       signs commits\n")
 	}
 	if p.BindDir != "" {
 		created := ""

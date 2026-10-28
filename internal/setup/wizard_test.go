@@ -96,14 +96,13 @@ func existing() *config.Config {
 func TestWizardFullFlow(t *testing.T) {
 	home := sandbox(t)
 	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Identity name":                         {"work", "Bad Name", "client"},
-		"GitHub account":                        {"login", "login"},
 		"Author name":                           {"<default>"},
-		"Email":                                 {"nope", "jane@work.example", "<default>"},
+		"Email":                                 {"nope", "jane@work.example", "jane@client.example"},
+		"Identity name":                         {"work", "Bad Name", "<default>"},
+		"GitHub account":                        {"login", "login"},
 		"SSH key":                               {"generate"},
 		"Key passphrase":                        {"no"},
 		"Add the key to jane-gh on GitHub?":     {"<default>"},
-		"Sign commits with this key?":           {"yes"},
 		"Directory for client":                  {"type"},
 		"Directory path":                        {"relative/dir", "~/Work", "~/Clients"},
 		"~/Clients/ does not exist. Create it?": {"<default>"},
@@ -117,7 +116,7 @@ func TestWizardFullFlow(t *testing.T) {
 			if logins == 1 {
 				return Account{}, "", errors.New("browser closed")
 			}
-			return Account{Login: "jane-gh", Name: "Jane From GitHub", ID: 42}, "~/.config/git-idm/gh/" + name, nil
+			return Account{Login: "jane-gh", ID: 42}, "~/.config/git-idm/gh/" + name, nil
 		},
 		Logout: func(string, string) { t.Fatal("must not log out on success") },
 	}
@@ -126,9 +125,9 @@ func TestWizardFullFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Plan{
-		Name: "client", AuthorName: "Jane From GitHub", Email: "42+jane-gh@users.noreply.github.com", Color: "green",
+		Name: "client", AuthorName: "Jane", Email: "jane@client.example", Color: "green",
 		GHUser: "jane-gh", GHConfigDir: "~/.config/git-idm/gh/client", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_client",
-		Upload: true, Sign: true, BindDir: "~/Clients/", CreateDir: true,
+		Upload: true, BindDir: "~/Clients/", CreateDir: true,
 	}
 	if p != want {
 		t.Fatalf("plan:\n got  %+v\n want %+v", p, want)
@@ -144,7 +143,7 @@ func TestWizardFullFlow(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "Clients")); !os.IsNotExist(err) {
 		t.Fatal("the wizard must not create anything")
 	}
-	for _, line := range []string{"gh     logged in as jane-gh", "new key ~/.ssh/git-idm_client (no passphrase)", "added to GitHub", "signs commits", "dir    ~/Clients/ (created)"} {
+	for _, line := range []string{"gh     logged in as jane-gh", "new key ~/.ssh/git-idm_client (no passphrase)", "added to GitHub", "dir    ~/Clients/ (created)"} {
 		if !strings.Contains(p.Summary(), line) {
 			t.Errorf("summary misses %q:\n%s", line, p.Summary())
 		}
@@ -172,7 +171,7 @@ func TestWizardMinimalFlowAsksLess(t *testing.T) {
 		t.Fatalf("plan = %+v", p)
 	}
 	for _, q := range f.asked {
-		if q == "Identity name" || q == "Key passphrase" || q == "Sign commits with this key?" || strings.HasPrefix(q, "Add the key") {
+		if q == "Identity name" || q == "Key passphrase" || strings.HasPrefix(q, "Add the key") {
 			t.Errorf("must not ask %q", q)
 		}
 	}
@@ -186,13 +185,12 @@ func TestWizardSSHChoices(t *testing.T) {
 		os.WriteFile(filepath.Join(ssh, f), []byte("k"), 0o600)
 	}
 	f := &fakePrompter{t: t, answers: map[string][]string{
-		"Author name":                 {"Jane"},
-		"Email":                       {"jane@client.example"},
-		"SSH key":                     {"~/.ssh/git-idm_client"},
-		"Sign commits with this key?": {"no"},
-		"Directory for client":        {"skip"},
-		"Prompt color":                {"<default>"},
-		"Create this identity?":       {"yes"},
+		"Author name":           {"Jane"},
+		"Email":                 {"jane@client.example"},
+		"SSH key":               {"~/.ssh/git-idm_client"},
+		"Directory for client":  {"skip"},
+		"Prompt color":          {"<default>"},
+		"Create this identity?": {"yes"},
 	}}
 	w := Wizard{Prompt: f, Config: existing(), DefaultName: "client"}
 	p, err := w.Run()
@@ -315,4 +313,46 @@ func (r *recordingPrompter) Select(title, description string, choices []Choice, 
 		r.descriptions = append(r.descriptions, description)
 	}
 	return r.fakePrompter.Select(title, description, choices, value)
+}
+
+func TestSuggestName(t *testing.T) {
+	for email, want := range map[string]string{
+		"jane@client.com":                 "client",
+		"jane@mail.client.com":            "client",
+		"jane@client.co.uk":               "client",
+		"jane@gmail.com":                  "personal",
+		"7+jane@users.noreply.github.com": "personal",
+		"jane@Code_Chem.io":               "code_chem",
+		"nope":                            "",
+	} {
+		if got := SuggestName(email); got != want {
+			t.Errorf("SuggestName(%q) = %q, want %q", email, got, want)
+		}
+	}
+}
+
+func TestWizardOrderAuthorEmailNameFirst(t *testing.T) {
+	sandbox(t)
+	f := &fakePrompter{t: t, answers: map[string][]string{
+		"Author name":           {"Jane"},
+		"Email":                 {"jane@acme.io"},
+		"Identity name":         {"<default>"},
+		"GitHub account":        {"skip"},
+		"SSH key":               {"none"},
+		"Directory for acme":    {"skip"},
+		"Prompt color":          {"<default>"},
+		"Create this identity?": {"yes"},
+	}}
+	w := &Wizard{Prompt: f, Config: existing(), Login: func(string) (Account, string, error) { return Account{}, "", nil }}
+	p, err := w.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "acme" {
+		t.Fatalf("name = %q", p.Name)
+	}
+	want := []string{"Author name", "Email", "Identity name", "GitHub account", "SSH key", "Directory for acme", "Prompt color", "Summary", "Create this identity?"}
+	if strings.Join(f.asked, ",") != strings.Join(want, ",") {
+		t.Fatalf("order:\n got  %v\n want %v", f.asked, want)
+	}
 }
