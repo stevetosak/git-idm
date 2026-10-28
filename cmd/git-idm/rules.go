@@ -16,7 +16,7 @@ import (
 func newApplyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply",
-		Short: "Write git config for all identities and rules",
+		Short: "Write the git config again from config.toml",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -31,7 +31,7 @@ func newApplyCmd() *cobra.Command {
 func newBindCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "bind <identity> [dir]",
-		Short: "Use an identity for every repo under a directory",
+		Short: "Use an identity for every repo in a folder",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -68,7 +68,7 @@ func newBindCmd() *cobra.Command {
 func newUnbindCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unbind [dir]",
-		Short: "Remove the rule for a directory",
+		Short: "Stop using an identity in a folder",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -102,7 +102,7 @@ func newMigrateCmd() *cobra.Command {
 	var opts migrate.Options
 	cmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Remove the old setup that git-idm now replaces",
+		Short: "Remove the old setup that git-idm replaced",
 		Long:  "Remove old includeIf entries, identity files and .envrc lines that git-idm rules now cover.\nEvery changed file is backed up first.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

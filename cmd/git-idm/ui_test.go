@@ -103,6 +103,41 @@ func TestListView(t *testing.T) {
 	}
 }
 
+func TestHelpGroupsAndUnknownCommands(t *testing.T) {
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"help"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	help := out.String()
+	order := []string{"Quick start:", "Essentials:", "  add ", "  edit ", "  rm ", "  ls ", "Switch identity:", "Check and protect:", "Setup:"}
+	last := -1
+	for _, s := range order {
+		i := strings.Index(help, s)
+		if i <= last {
+			t.Fatalf("%q is missing or out of order in:\n%s", s, help)
+		}
+		last = i
+	}
+	for _, hidden := range []string{"check-commit", "  env "} {
+		if strings.Contains(help, hidden) {
+			t.Errorf("%q must be hidden", hidden)
+		}
+	}
+	if strings.Contains(help, "Additional Commands") {
+		t.Errorf("every command must be in a group:\n%s", help)
+	}
+
+	root = newRootCmd()
+	root.SetArgs([]string{"lss"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "did you mean: ls") || !strings.Contains(err.Error(), "git-idm help") {
+		t.Fatalf("unknown command error = %v", err)
+	}
+}
+
 func TestStatusWithoutConfigShowsWelcome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

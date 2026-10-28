@@ -19,7 +19,7 @@ var errBlocked = errors.New("commit blocked by git-idm guard")
 func newGuardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "guard [block|warn|off]",
-		Short:     "Check the commit author before each commit",
+		Short:     "Stop commits with the wrong author",
 		Long:      "block: stop commits with the wrong author. warn: print a warning only. off: no check.\nWith no argument, show the current mode.",
 		Args:      cobra.MaximumNArgs(1),
 		ValidArgs: []string{string(config.GuardBlock), string(config.GuardWarn), string(config.GuardOff)},
@@ -59,7 +59,7 @@ func newAllowCmd() *cobra.Command {
 	var remove bool
 	cmd := &cobra.Command{
 		Use:   "allow",
-		Short: "Accept this repo's current commit author on purpose",
+		Short: "Accept the commit author that this repo sets itself",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, res, err := current()

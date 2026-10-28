@@ -13,7 +13,7 @@ import (
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Find problems with identities, keys, gh, hooks and the shell",
+		Short: "Find problems with keys, gh logins, hooks and the shell",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, res, err := current()

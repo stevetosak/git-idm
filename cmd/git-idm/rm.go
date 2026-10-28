@@ -15,7 +15,7 @@ func newRmCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "rm <identity>",
-		Short: "Remove an identity, and optionally its SSH key, GitHub key and gh login",
+		Short: "Remove an identity and clean up its keys and gh login",
 		Long: "In a terminal, rm asks what to delete. With --yes it deletes what git-idm created\n" +
 			"(git-idm_* keys, their GitHub entry, and logins under ~/.config/git-idm/gh). Without a terminal\n" +
 			"and without --yes, rm changes only the config.",

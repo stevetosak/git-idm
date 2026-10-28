@@ -15,7 +15,7 @@ func newEditCmd() *cobra.Command {
 	var makeDefault bool
 	cmd := &cobra.Command{
 		Use:   "edit <identity>",
-		Short: "Change fields of an identity",
+		Short: "Change an identity, for example its signing key",
 		Example: "  git-idm edit client --signing-key ~/.ssh/git-idm_client.pub\n" +
 			"  git-idm edit client --email jane@client.com --color magenta",
 		Args: cobra.ExactArgs(1),

@@ -10,18 +10,69 @@ import (
 	"github.com/stevetosak/git-idm/internal/ui"
 )
 
+const quickStart = `git-idm keeps one git identity per folder: commit author, SSH key and gh account.
+
+Quick start:
+  git-idm add          create an identity (asks a few questions)
+  git-idm              show the identity for this folder
+  git-idm ls           list all identities
+  git-idm use <id>     switch identity in this shell only`
+
+var commandGroups = []struct {
+	id, title string
+	commands  []string
+}{
+	{"essentials", "Essentials:", []string{"add", "edit", "rm", "ls", "help"}},
+	{"switching", "Switch identity:", []string{"use", "bind", "unbind"}},
+	{"safety", "Check and protect:", []string{"doctor", "guard", "allow"}},
+	{"setup", "Setup:", []string{"init", "migrate", "apply", "hook", "prompt", "completion"}},
+}
+
 func newRootCmd() *cobra.Command {
+	cobra.EnableCommandSorting = false
 	root := &cobra.Command{
 		Use:           "git-idm",
 		Short:         "Git identity manager",
+		Long:          quickStart,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
-		RunE:          runStatus,
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return unknownCommand(cmd, args[0])
+			}
+			return runStatus(cmd, args)
+		},
 	}
-	root.AddCommand(newAddCmd(), newLsCmd(), newInitCmd(), newApplyCmd(), newBindCmd(), newUnbindCmd(), newMigrateCmd(),
-		newHookCmd(), newEnvCmd(), newUseCmd(), newPromptCmd(), newEditCmd(), newRmCmd(), newGuardCmd(), newAllowCmd(), newCheckCommitCmd(), newDoctorCmd())
+	root.AddCommand(
+		newAddCmd(), newEditCmd(), newRmCmd(), newLsCmd(),
+		newUseCmd(), newBindCmd(), newUnbindCmd(),
+		newDoctorCmd(), newGuardCmd(), newAllowCmd(),
+		newInitCmd(), newMigrateCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
+		newEnvCmd(), newCheckCommitCmd(),
+	)
+	root.SuggestionsMinimumDistance = 2
+	group := map[string]string{}
+	for _, g := range commandGroups {
+		root.AddGroup(&cobra.Group{ID: g.id, Title: g.title})
+		for _, name := range g.commands {
+			group[name] = g.id
+		}
+	}
+	for _, c := range root.Commands() {
+		c.GroupID = group[c.Name()]
+	}
+	root.SetHelpCommandGroupID("essentials")
+	root.SetCompletionCommandGroupID("setup")
 	return root
+}
+
+func unknownCommand(cmd *cobra.Command, name string) error {
+	msg := fmt.Sprintf("unknown command %q", name)
+	if suggestions := cmd.SuggestionsFor(name); len(suggestions) > 0 {
+		msg += ", did you mean: " + strings.Join(suggestions, ", ")
+	}
+	return fmt.Errorf("%s\nsee all commands: git-idm help", msg)
 }
 
 func newAddCmd() *cobra.Command {
@@ -30,7 +81,7 @@ func newAddCmd() *cobra.Command {
 	var makeDefault bool
 	cmd := &cobra.Command{
 		Use:   "add [identity]",
-		Short: "Add an identity (asks questions when --email is not given)",
+		Short: "Create an identity (asks a few questions)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
