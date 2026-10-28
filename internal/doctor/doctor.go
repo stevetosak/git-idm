@@ -1,13 +1,16 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/ghauth"
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/guard"
 	"github.com/stevetosak/git-idm/internal/importer"
@@ -33,6 +36,12 @@ type Env struct {
 	Getenv    func(string) string
 	HookHint  string
 	ShellHook bool
+	GHAccount func(dir string) (ghauth.Account, error)
+}
+
+type tokenResult struct {
+	account ghauth.Account
+	err     error
 }
 
 func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Check {
@@ -54,8 +63,9 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 		add(Warn, "git-idm apply", "settings after the git-idm block in %s can override identities", config.ContractHome(a.GlobalConfig))
 	}
 
+	tokens := checkTokens(c, env.GHAccount)
 	for _, name := range c.Names() {
-		checks = append(checks, identityChecks(a, name, c.Identities[name])...)
+		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens)...)
 	}
 
 	checks = append(checks, guardChecks(c, a, string(global))...)
@@ -79,7 +89,7 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	return checks
 }
 
-func identityChecks(a *gitgen.Applier, name string, id config.Identity) []Check {
+func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult) []Check {
 	var checks []Check
 	add := func(level Level, fix, format string, args ...any) {
 		checks = append(checks, Check{Level: level, Text: name + ": " + fmt.Sprintf(format, args...), Fix: fix})
@@ -101,17 +111,61 @@ func identityChecks(a *gitgen.Applier, name string, id config.Identity) []Check 
 	}
 	if id.GHConfigDir != "" {
 		user := importer.GHUserFromConfigDir(id.GHConfigDir)
-		login := fmt.Sprintf("GH_CONFIG_DIR=%s gh auth login", id.GHConfigDir)
+		login := loginFix(id.GHConfigDir)
+		token, checked := tokens[config.ExpandHome(id.GHConfigDir)]
 		switch {
 		case user == "":
 			add(Fail, login, "gh is not logged in (%s)", id.GHConfigDir)
 		case id.GHUser != "" && !strings.EqualFold(user, id.GHUser):
 			add(Fail, login, "gh is logged in as %s, config expects %s", user, id.GHUser)
-		default:
+		case !checked:
 			add(OK, "", "gh logged in as %s", user)
+		case errors.Is(token.err, ghauth.ErrUnauthorized):
+			add(Fail, login, "gh token for %s is invalid or revoked (%s)", user, id.GHConfigDir)
+		case token.err != nil:
+			add(Warn, "", "gh logged in as %s, but the token could not be checked: %v", user, token.err)
+		case id.GHUser != "" && !strings.EqualFold(token.account.Login, id.GHUser):
+			add(Fail, login, "gh token belongs to %s, config expects %s", token.account.Login, id.GHUser)
+		default:
+			add(OK, "", "gh logged in as %s, the token works", token.account.Login)
+			if !token.account.CanAddKeys() {
+				add(Info, fmt.Sprintf("GH_CONFIG_DIR=%s gh auth refresh -h github.com -s admin:public_key", id.GHConfigDir),
+					"gh login cannot add SSH keys (no admin:public_key scope)")
+			}
 		}
 	}
 	return checks
+}
+
+func loginFix(dir string) string {
+	return fmt.Sprintf("GH_CONFIG_DIR=%s gh auth login", dir)
+}
+
+func checkTokens(c *config.Config, fetch func(string) (ghauth.Account, error)) map[string]tokenResult {
+	results := map[string]tokenResult{}
+	if fetch == nil {
+		return results
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	seen := map[string]bool{}
+	for _, name := range c.Names() {
+		dir := config.ExpandHome(c.Identities[name].GHConfigDir)
+		if dir == "" || seen[dir] || importer.GHUserFromConfigDir(dir) == "" {
+			continue
+		}
+		seen[dir] = true
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			account, err := fetch(dir)
+			mu.Lock()
+			results[dir] = tokenResult{account, err}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return results
 }
 
 func guardChecks(c *config.Config, a *gitgen.Applier, global string) []Check {

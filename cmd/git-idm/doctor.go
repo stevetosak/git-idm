@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/doctor"
+	"github.com/stevetosak/git-idm/internal/ghauth"
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/shell"
 )
@@ -25,7 +27,11 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 			_, hook := os.LookupEnv(shell.SegmentVar)
-			checks := doctor.Run(c, a, res, doctor.Env{Getenv: os.Getenv, HookHint: hookHint, ShellHook: hook})
+			env := doctor.Env{Getenv: os.Getenv, HookHint: hookHint, ShellHook: hook}
+			if gh, err := exec.LookPath("gh"); err == nil {
+				env.GHAccount = func(dir string) (ghauth.Account, error) { return ghauth.Fetch(gh, dir) }
+			}
+			checks := doctor.Run(c, a, res, env)
 			out := cmd.OutOrStdout()
 			color := colorEnabled(out)
 			marks := map[doctor.Level][2]string{

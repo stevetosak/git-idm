@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/ghauth"
 )
 
 type SSHMode string
@@ -21,15 +21,7 @@ const (
 	SSHExisting SSHMode = "existing"
 )
 
-type Account struct {
-	Login  string   `json:"login"`
-	ID     int64    `json:"id"`
-	Scopes []string `json:"-"`
-}
-
-func (a Account) CanAddKeys() bool {
-	return a.Scopes == nil || slices.Contains(a.Scopes, "admin:public_key") || slices.Contains(a.Scopes, "write:public_key")
-}
+type Account = ghauth.Account
 
 type Plan struct {
 	Name        string

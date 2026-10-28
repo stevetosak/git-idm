@@ -51,31 +51,6 @@ func TestExistingLogins(t *testing.T) {
 	}
 }
 
-func TestParseAccountScopes(t *testing.T) {
-	body := `{"login":"jane","id":7}`
-	cases := []struct {
-		name     string
-		response string
-		scopes   []string
-		canAdd   bool
-	}{
-		{"no headers", body, nil, true},
-		{"missing scope", "HTTP/2.0 200 OK\nX-Oauth-Scopes: gist, read:org, repo\n\n" + body, []string{"gist", "read:org", "repo"}, false},
-		{"admin scope", "HTTP/2.0 200 OK\r\nX-OAuth-Scopes: repo, admin:public_key\r\n\r\n" + body, []string{"repo", "admin:public_key"}, true},
-		{"write scope", "HTTP/2.0 200 OK\nX-Oauth-Scopes: write:public_key\n\n" + body, []string{"write:public_key"}, true},
-		{"empty scopes", "HTTP/2.0 200 OK\nX-Oauth-Scopes: \n\n" + body, []string{}, false},
-	}
-	for _, tc := range cases {
-		a, err := parseAccount(tc.response)
-		if err != nil || a.Login != "jane" || !slices.Equal(a.Scopes, tc.scopes) || a.CanAddKeys() != tc.canAdd {
-			t.Errorf("%s: %+v %v canAdd=%v", tc.name, a, err, a.CanAddKeys())
-		}
-	}
-	if _, err := parseAccount("HTTP/2.0 401 Unauthorized\n\n{\"message\":\"Bad credentials\"}"); err == nil {
-		t.Error("want error without a login")
-	}
-}
-
 func TestWizardUsesExistingLogin(t *testing.T) {
 	sandbox(t)
 	f := &fakePrompter{t: t, answers: map[string][]string{

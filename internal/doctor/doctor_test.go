@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/ghauth"
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/resolve"
 )
@@ -117,5 +119,67 @@ func TestDoctorHealthy(t *testing.T) {
 	}
 	if ch := find(checks, "core.hooksPath = /elsewhere"); ch == nil || ch.Level != Fail {
 		t.Errorf("foreign hooksPath: got %+v", ch)
+	}
+}
+
+func TestDoctorChecksTokens(t *testing.T) {
+	home, c, a := setup(t)
+	for dir, user := range map[string]string{"gh": "w-gh", "gh-p": "p-gh", "gh-x": "x-gh", "gh-o": "o-gh", "gh-n": "n-gh"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, dir, "hosts.yml"), []byte("github.com:\n    user: "+user+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Identities["work"] = config.Identity{Name: "W", Email: "w@x.example", GHConfigDir: "~/gh", GHUser: "w-gh"}
+	c.Identities["work2"] = config.Identity{Name: "W", Email: "w2@x.example", GHConfigDir: "~/gh", GHUser: "w-gh"}
+	c.Identities["personal"] = config.Identity{Name: "P", Email: "p@x.example", GHConfigDir: "~/gh-p", GHUser: "p-gh"}
+	c.Identities["offline"] = config.Identity{Name: "X", Email: "x@x.example", GHConfigDir: "~/gh-x", GHUser: "x-gh"}
+	c.Identities["other"] = config.Identity{Name: "O", Email: "o@x.example", GHConfigDir: "~/gh-o", GHUser: "o-gh"}
+	c.Identities["noscope"] = config.Identity{Name: "N", Email: "n@x.example", GHConfigDir: "~/gh-n", GHUser: "n-gh"}
+
+	var mu sync.Mutex
+	calls := map[string]int{}
+	fetch := func(dir string) (ghauth.Account, error) {
+		mu.Lock()
+		calls[filepath.Base(dir)]++
+		mu.Unlock()
+		switch filepath.Base(dir) {
+		case "gh-p":
+			return ghauth.Account{}, ghauth.ErrUnauthorized
+		case "gh-x":
+			return ghauth.Account{}, ghauth.ErrUnreachable
+		case "gh-o":
+			return ghauth.Account{Login: "someone-else"}, nil
+		case "gh-n":
+			return ghauth.Account{Login: "n-gh", Scopes: []string{"repo"}}, nil
+		}
+		return ghauth.Account{Login: "w-gh", Scopes: []string{"admin:public_key"}}, nil
+	}
+	checks := Run(c, a, resolve.Result{Identity: "work", Source: resolve.SourceDefault},
+		Env{Getenv: func(string) string { return "" }, GHAccount: fetch})
+
+	want := []struct {
+		text  string
+		level Level
+	}{
+		{"work: gh logged in as w-gh, the token works", OK},
+		{"work2: gh logged in as w-gh, the token works", OK},
+		{"personal: gh token for p-gh is invalid or revoked (~/gh-p)", Fail},
+		{"offline: gh logged in as x-gh, but the token could not be checked: GitHub could not be reached", Warn},
+		{"other: gh token belongs to someone-else, config expects o-gh", Fail},
+		{"noscope: gh login cannot add SSH keys (no admin:public_key scope)", Info},
+	}
+	for _, w := range want {
+		if ch := find(checks, w.text); ch == nil || ch.Level != w.level {
+			t.Errorf("%q: got %+v", w.text, ch)
+		}
+	}
+	if ch := find(checks, "invalid or revoked"); ch == nil || ch.Fix != "GH_CONFIG_DIR=~/gh-p gh auth login" {
+		t.Errorf("fix: %+v", ch)
+	}
+	if calls["gh"] != 1 || len(calls) != 5 {
+		t.Errorf("each gh folder must be checked once: %v", calls)
 	}
 }

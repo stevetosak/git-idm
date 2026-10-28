@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/ghauth"
 	"github.com/stevetosak/git-idm/internal/importer"
 )
 
@@ -207,40 +207,7 @@ func (e *Executor) Account(dir string) (Account, error) {
 	if e.Tools.GH == "" {
 		return Account{}, fmt.Errorf("gh is not installed (https://cli.github.com)")
 	}
-	cmd := exec.Command(e.Tools.GH, "api", "user", "--include")
-	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+config.ExpandHome(dir))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return Account{}, fmt.Errorf("read GitHub account: %v: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return parseAccount(string(out))
-}
-
-func parseAccount(response string) (Account, error) {
-	response = strings.ReplaceAll(response, "\r\n", "\n")
-	headers, body, found := strings.Cut(response, "\n\n")
-	if !found {
-		headers, body = "", response
-	}
-	var a Account
-	if err := json.Unmarshal([]byte(body), &a); err != nil || a.Login == "" {
-		return Account{}, fmt.Errorf("read GitHub account: unexpected answer from gh api user")
-	}
-	for _, line := range strings.Split(headers, "\n") {
-		name, value, ok := strings.Cut(line, ":")
-		if !ok || !strings.EqualFold(strings.TrimSpace(name), "X-OAuth-Scopes") {
-			continue
-		}
-		a.Scopes = []string{}
-		for _, scope := range strings.Split(value, ",") {
-			if scope = strings.TrimSpace(scope); scope != "" {
-				a.Scopes = append(a.Scopes, scope)
-			}
-		}
-	}
-	return a, nil
+	return ghauth.Fetch(e.Tools.GH, dir)
 }
 
 func (e *Executor) Logout(dir, user string) {
