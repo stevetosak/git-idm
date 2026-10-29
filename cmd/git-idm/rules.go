@@ -50,9 +50,9 @@ func newBindCmd() *cobra.Command {
 			}
 			var rulePath string
 			if len(args) == 2 {
-				rulePath, err = rulePathFor(args[1:])
+				rulePath, err = explicitBindPath(args[1])
 			} else {
-				rulePath, err = currentBindPath(c)
+				rulePath, err = currentBindPath(cmd.OutOrStdout())
 			}
 			if err != nil {
 				return err
@@ -287,15 +287,31 @@ func applyConfig(out io.Writer, c *config.Config) error {
 	return err
 }
 
-func currentBindPath(c *config.Config) (string, error) {
+func currentBindPath(out io.Writer) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	if root := resolve.Resolve(c, cwd, "").RepoRoot; root != "" {
-		cwd = root
+	if root, gitdir := resolve.RepoAt(cwd); root != "" {
+		cwd = resolve.BindRoot(root, gitdir)
+		if cwd != root {
+			fmt.Fprintf(out, "%s keeps its git data in %s, so git uses the rule of %s\n", config.ContractHome(root), config.ContractHome(gitdir), config.ContractHome(cwd))
+		}
 	}
 	return rulePathFor([]string{cwd})
+}
+
+func explicitBindPath(dir string) (string, error) {
+	abs, err := filepath.Abs(config.ExpandHome(dir))
+	if err != nil {
+		return "", err
+	}
+	if root, gitdir := resolve.RepoAt(abs); root == abs {
+		if owner := resolve.BindRoot(root, gitdir); owner != root {
+			return "", fmt.Errorf("%s keeps its git data in %s, so a rule for it has no effect; bind %s instead", config.ContractHome(root), config.ContractHome(gitdir), config.ContractHome(owner))
+		}
+	}
+	return rulePathFor([]string{dir})
 }
 
 func pickBindIdentity(cmd *cobra.Command, c *config.Config, rulePath string) (string, error) {

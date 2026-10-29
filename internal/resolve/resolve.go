@@ -26,6 +26,7 @@ type Result struct {
 	Rule         *config.Rule
 	RuleIdentity string
 	RepoRoot     string
+	GitDir       string
 	LocalUser    string
 	LocalEmail   string
 	Suggested    string
@@ -40,6 +41,7 @@ func Resolve(c *config.Config, cwd, override string) Result {
 	matchPath := cwd
 	if root, gitdir := findRepo(cwd); root != "" {
 		res.RepoRoot = root
+		res.GitDir = gitdir
 		matchPath = gitdir
 		res.LocalUser, res.LocalEmail = localUser(filepath.Join(gitdir, "config"))
 	}
@@ -57,6 +59,21 @@ func Resolve(c *config.Config, cwd, override string) Result {
 		res.Suggested = c.Default
 	}
 	return res
+}
+
+func BindRoot(root, gitdir string) string {
+	if gitdir == "" || filepath.Clean(gitdir) == filepath.Join(root, ".git") {
+		return root
+	}
+	sep := string(filepath.Separator)
+	if i := strings.Index(gitdir, sep+".git"+sep); i > 0 {
+		return gitdir[:i]
+	}
+	return filepath.Clean(gitdir)
+}
+
+func RepoAt(dir string) (root, gitdir string) {
+	return findRepo(dir)
 }
 
 func matchRule(rules []config.Rule, path string) *config.Rule {

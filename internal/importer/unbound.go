@@ -28,22 +28,20 @@ func ScanHome(extra ...string) localid.Result {
 
 func UnboundGroups(c *config.Config, repos []localid.Repo) []UnboundGroup {
 	home, _ := os.UserHomeDir()
-	var unbound []localid.Repo
-	for _, repo := range repos {
-		if coveringRule(c.Rules, repo.Root) == nil && !insideOther(repos, repo.Root) {
-			unbound = append(unbound, repo)
-		}
-	}
 	suggest := map[string]string{}
 	byParent := map[string][]string{}
 	var parents []string
-	for _, repo := range unbound {
-		suggest[repo.Root] = suggestIdentity(c, repo)
-		parent := filepath.Dir(repo.Root)
+	for _, repo := range repos {
+		owner := ownerDir(repo)
+		if _, seen := suggest[owner]; seen || coveringRule(c.Rules, gitDataDir(repo)) != nil || insideOther(repos, owner) {
+			continue
+		}
+		suggest[owner] = suggestIdentity(c, repo)
+		parent := filepath.Dir(owner)
 		if byParent[parent] == nil {
 			parents = append(parents, parent)
 		}
-		byParent[parent] = append(byParent[parent], repo.Root)
+		byParent[parent] = append(byParent[parent], owner)
 	}
 	var groups []UnboundGroup
 	for _, parent := range parents {
@@ -60,18 +58,26 @@ func UnboundGroups(c *config.Config, repos []localid.Repo) []UnboundGroup {
 	return groups
 }
 
-func insideOther(repos []localid.Repo, root string) bool {
+func insideOther(repos []localid.Repo, dir string) bool {
 	for _, other := range repos {
-		if other.Root != root && under(root, other.Root) {
+		if owner := ownerDir(other); owner != dir && under(dir, owner) {
 			return true
 		}
 	}
 	return false
 }
 
+func ownerDir(repo localid.Repo) string {
+	data := gitDataDir(repo)
+	if filepath.Base(data) == ".git" {
+		return filepath.Dir(data)
+	}
+	return data
+}
+
 func hasBoundRepo(c *config.Config, repos []localid.Repo, dir string) bool {
 	for _, repo := range repos {
-		if under(repo.Root, dir) && coveringRule(c.Rules, repo.Root) != nil {
+		if under(repo.Root, dir) && coveringRule(c.Rules, gitDataDir(repo)) != nil {
 			return true
 		}
 	}

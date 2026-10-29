@@ -119,3 +119,29 @@ func TestBindWithoutDefaultNeedsIdentity(t *testing.T) {
 		t.Fatalf("in a terminal the list still works: %v %s\n%s", err, rules(t), out)
 	}
 }
+
+func TestBindWorktreeUsesMainRepo(t *testing.T) {
+	home := bindHome(t, "work")
+	main := filepath.Join(home, "code", "repo")
+	wt := filepath.Join(home, "elsewhere", "wt")
+	for _, args := range [][]string{
+		{"-C", main, "-c", "user.name=X", "-c", "user.email=x@x.example", "commit", "-q", "--allow-empty", "--no-verify", "-m", "x"},
+		{"-C", main, "worktree", "add", "-q", "--detach", wt},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+
+	_, err := runBind(t, home, nil, "client", wt)
+	if err == nil || !strings.Contains(err.Error(), "~/elsewhere/wt keeps its git data in ~/code/repo/.git/worktrees/wt, so a rule for it has no effect; bind ~/code/repo instead") {
+		t.Fatalf("explicit worktree folder: %v", err)
+	}
+	out, err := runBind(t, wt, nil)
+	if err != nil || !strings.Contains(out, "so git uses the rule of ~/code/repo") || !strings.Contains(out, "bound ~/code/repo/ to work") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := rules(t); got != "~/code/repo/=work" {
+		t.Fatalf("rules = %s", got)
+	}
+}
