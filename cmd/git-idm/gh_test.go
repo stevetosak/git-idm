@@ -64,7 +64,7 @@ func ghSandbox(t *testing.T) string {
 	c := config.New()
 	c.Default = "work"
 	c.Identities["work"] = config.Identity{Name: "W", Email: "w@x.example", GHConfigDir: "~/gh-work"}
-	c.Identities["client"] = config.Identity{Name: "C", Email: "c@x.example", GHConfigDir: "~/gh-client"}
+	c.Identities["client"] = config.Identity{Name: "C", Email: "c@x.example", GHConfigDir: "~/gh-client", GHUser: "c-gh"}
 	c.Identities["plain"] = config.Identity{Name: "P", Email: "p@x.example"}
 	c.Rules = []config.Rule{{Path: "~/client/", Identity: "client"}, {Path: "~/plain/", Identity: "plain"}}
 	if err := c.Save(); err != nil {
@@ -109,7 +109,7 @@ func TestGHEnvFollowsFolder(t *testing.T) {
 			environ = append(environ, ghConfigEnv+"="+tc.inherited)
 		}
 		var stderr bytes.Buffer
-		got := ghEnv(environ, &stderr)
+		got, _ := ghEnv(environ, &stderr)
 		if dir := ghConfigDir(got); dir != tc.want {
 			t.Errorf("%s inherited %q override %q: GH_CONFIG_DIR = %s, want %s", tc.dir, tc.inherited, tc.override, dir, tc.want)
 		}
@@ -159,8 +159,57 @@ func TestGHWithoutConfigStillRuns(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(home)
 	var stderr bytes.Buffer
-	env := ghEnv([]string{"GH_CONFIG_DIR=/keep"}, &stderr)
+	env, _ := ghEnv([]string{"GH_CONFIG_DIR=/keep"}, &stderr)
 	if ghConfigDir(env) != "/keep" || !strings.Contains(stderr.String(), "gh runs without a git-idm identity") {
 		t.Fatalf("env = %v, stderr = %q", env, stderr.String())
+	}
+}
+
+func TestGHRefusesAuthoringWithWrongLogin(t *testing.T) {
+	home := ghSandbox(t)
+	real := filepath.Join(home, "tools", "gh")
+	executable(t, real)
+	t.Setenv("PATH", filepath.Dir(real))
+	t.Chdir(filepath.Join(home, "client", "repo"))
+	login := func(user string) {
+		os.MkdirAll(filepath.Join(home, "gh-client"), 0o700)
+		os.WriteFile(filepath.Join(home, "gh-client", "hosts.yml"), []byte("github.com:\n    user: "+user+"\n"), 0o600)
+	}
+	old := execGH
+	t.Cleanup(func() { execGH = old })
+	ran := false
+	execGH = func(string, []string, []string) error { ran = true; return nil }
+	gh := func(args ...string) error {
+		ran = false
+		root := newRootCmd()
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+		root.SetArgs(append([]string{"gh"}, args...))
+		return root.Execute()
+	}
+
+	login("martin-gh")
+	err := gh("pr", "create", "--fill")
+	if err == nil || ran || !strings.Contains(err.Error(), "gh is logged in as martin-gh, but client uses c-gh") || !strings.Contains(err.Error(), "git-idm login client") {
+		t.Fatalf("wrong login: ran=%v err=%v", ran, err)
+	}
+	for _, args := range [][]string{{"pr", "list"}, {"issue", "comment", "1"}, {"api", "user"}} {
+		if args[0] == "issue" {
+			t.Setenv("GIT_IDM_GH_CHECK", "0")
+		}
+		if err := gh(args...); err != nil || !ran {
+			t.Errorf("%v: ran=%v err=%v", args, ran, err)
+		}
+		t.Setenv("GIT_IDM_GH_CHECK", "")
+	}
+	t.Setenv(ghConfigEnv, "/my/own/gh")
+	if err := gh("pr", "create"); err != nil || !ran {
+		t.Errorf("own GH_CONFIG_DIR: ran=%v err=%v", ran, err)
+	}
+	os.Unsetenv(ghConfigEnv)
+
+	login("C-GH")
+	if err := gh("pr", "create"); err != nil || !ran {
+		t.Errorf("right login: ran=%v err=%v", ran, err)
 	}
 }
