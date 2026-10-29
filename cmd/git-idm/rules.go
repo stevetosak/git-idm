@@ -127,7 +127,7 @@ func newMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Remove the old setup that git-idm replaced",
-		Long:  "Remove old includeIf entries, identity files, .envrc lines and repo author keys that git-idm rules now cover.\nEvery changed file is backed up first. Then offer to bind repos that have no identity yet.",
+		Long:  "Remove old includeIf entries, identity files, .envrc lines and repo author keys that git-idm rules now cover.\nEvery changed file is backed up first. Then move gh logins out of the default gh folder, and offer to bind repos that have no identity yet.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -150,7 +150,8 @@ func newMigrateCmd() *cobra.Command {
 			legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, scan.Repos))
 			home := importer.ScanHome()
 			groups := importer.UnboundGroups(c, home.Repos)
-			if len(legacy) == 0 && len(groups) == 0 {
+			ghUser, ghMoving := defaultGHWork(c)
+			if len(legacy) == 0 && len(groups) == 0 && ghUser == "" && len(ghMoving) == 0 {
 				fmt.Fprintln(out, "nothing to migrate")
 				return nil
 			}
@@ -160,6 +161,9 @@ func newMigrateCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+			}
+			if err := isolateDefaultGH(cmd, out, c, opts.DryRun); err != nil {
+				return err
 			}
 			return bindUnbound(cmd, out, c, groups, opts.DryRun)
 		},

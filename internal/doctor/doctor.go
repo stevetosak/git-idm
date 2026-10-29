@@ -100,6 +100,7 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	local := localChecks(c)
 	checks = append(checks, local...)
 	checks = append(checks, unboundChecks(c)...)
+	checks = append(checks, defaultGHChecks(c)...)
 	if res.RepoRoot != "" {
 		checks = append(checks, repoChecks(c, res, local)...)
 	}
@@ -121,6 +122,23 @@ func localChecks(c *config.Config) []Check {
 			fix = "git-idm migrate, or git-idm allow in the repo (if on purpose)"
 		}
 		checks = append(checks, Check{Level: Warn, Text: text, Fix: fix})
+	}
+	return checks
+}
+
+func defaultGHChecks(c *config.Config) []Check {
+	if !gitgen.UsesGH(c) {
+		return nil
+	}
+	def := importer.DefaultGHConfigDir()
+	var checks []Check
+	if user := importer.GHUserFromConfigDir(def); user != "" {
+		checks = append(checks, Check{Level: Warn, Text: fmt.Sprintf("the default gh folder %s is logged in as %s: a gh that skips git-idm acts as %s", def, user, user), Fix: "git-idm migrate"})
+	}
+	for _, name := range c.Names() {
+		if importer.IsDefaultGHDir(c.Identities[name].GHConfigDir) {
+			checks = append(checks, Check{Level: Warn, Text: name + " uses the default gh folder " + def + ", which any gh can use", Fix: "git-idm migrate"})
+		}
 	}
 	return checks
 }

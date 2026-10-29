@@ -259,3 +259,17 @@ func TestDoctorChecksGHShim(t *testing.T) {
 	os.WriteFile(a.ShimPath(), []byte("#!/bin/sh\n"), 0o755)
 	check(a.ShimPath(), "~/.local/bin/gh is not made by git-idm", Info)
 }
+
+func TestDoctorWarnsAboutDefaultGHLogin(t *testing.T) {
+	home, c, a := setup(t)
+	os.MkdirAll(filepath.Join(home, ".config", "gh"), 0o700)
+	os.WriteFile(filepath.Join(home, ".config", "gh", "hosts.yml"), []byte("github.com:\n    user: mdr\n"), 0o600)
+	c.Identities["old"] = config.Identity{Name: "O", Email: "o@x.example", GHConfigDir: "~/.config/gh", GHUser: "mdr"}
+	checks := run(c, a, nil)
+	if ch := find(checks, "the default gh folder ~/.config/gh is logged in as mdr"); ch == nil || ch.Level != Warn || ch.Fix != "git-idm migrate" {
+		t.Errorf("default login: got %+v", ch)
+	}
+	if ch := find(checks, "old uses the default gh folder"); ch == nil || ch.Level != Warn {
+		t.Errorf("identity on the default folder: got %+v", ch)
+	}
+}

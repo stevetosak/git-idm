@@ -156,3 +156,17 @@ func TestRemoveSummaryEndsTemporaryBinding(t *testing.T) {
 		t.Fatalf("summary:\n%s", s)
 	}
 }
+
+func TestRemoverKeepsSharedAccountLoggedIn(t *testing.T) {
+	c := config.New()
+	c.Identities["work"] = config.Identity{Name: "W", Email: "w@x.example", GHConfigDir: "/m/gh/work", GHUser: "mdr"}
+	c.Identities["martin"] = config.Identity{Name: "M", Email: "m@x.example", GHConfigDir: "/m/gh/martin", GHUser: "MDR"}
+	c.Identities["solo"] = config.Identity{Name: "S", Email: "s@x.example", GHConfigDir: "/m/gh/solo", GHUser: "solo"}
+	r := &Remover{Config: c, ManagedGHRoot: "/m/gh"}
+	if r.ownLogin("work") {
+		t.Fatal("logging out work would delete the keychain token that martin also uses")
+	}
+	if !r.ownLogin("solo") {
+		t.Fatal("solo has its own account")
+	}
+}

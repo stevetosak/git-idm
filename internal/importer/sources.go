@@ -89,6 +89,10 @@ func DefaultGHConfigDir() string {
 	return "~/.config/gh"
 }
 
+func IsDefaultGHDir(dir string) bool {
+	return dir != "" && filepath.Clean(config.ExpandHome(dir)) == filepath.Clean(config.ExpandHome(DefaultGHConfigDir()))
+}
+
 func GHUserFromConfigDir(dir string) string {
 	data, err := os.ReadFile(filepath.Join(config.ExpandHome(dir), "hosts.yml"))
 	if err != nil {

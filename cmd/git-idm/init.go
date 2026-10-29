@@ -165,6 +165,9 @@ func runInitReview(cmd *cobra.Command, prompter setup.Prompter, opts importer.Op
 	if err := offerMigrate(out, prompter, c, mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, res.Repos))); err != nil {
 		return err
 	}
+	if err := isolateDefaultGH(cmd, out, c, false); err != nil {
+		return err
+	}
 	if err := bindUnbound(cmd, out, c, importer.UnboundGroups(c, res.Repos), false); err != nil {
 		return err
 	}

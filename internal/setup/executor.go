@@ -89,6 +89,14 @@ func (e *Executor) Run(p Plan) (config.Identity, *Report, error) {
 		id.Protocol = config.ProtocolSSH
 	}
 	if p.GHUser != "" {
+		if !p.NewLogin && importer.IsDefaultGHDir(p.GHConfigDir) {
+			own := filepath.Join(e.ConfigDir, "gh", p.Name)
+			if err := ghauth.CopyLogin(config.ExpandHome(p.GHConfigDir), own); err != nil {
+				return fail("copy the gh login", err)
+			}
+			e.step(r, "copied the gh login of %s to %s", p.GHUser, config.ContractHome(own))
+			p.GHConfigDir = own
+		}
 		id.GHConfigDir = config.ContractHome(p.GHConfigDir)
 		id.GHUser = p.GHUser
 		if p.SSH != SSHNone && p.NewLogin {
