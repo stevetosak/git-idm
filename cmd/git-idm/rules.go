@@ -11,6 +11,8 @@ import (
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/importer"
 	"github.com/stevetosak/git-idm/internal/migrate"
+	"github.com/stevetosak/git-idm/internal/resolve"
+	"github.com/stevetosak/git-idm/internal/setup"
 )
 
 func newApplyCmd() *cobra.Command {
@@ -31,21 +33,36 @@ func newApplyCmd() *cobra.Command {
 func newBindCmd() *cobra.Command {
 	var temporary bool
 	cmd := &cobra.Command{
-		Use:   "bind <identity> [dir]",
+		Use:   "bind [identity] [dir]",
 		Short: "Use an identity for every repo in a folder",
-		Example: "  git-idm bind work ~/Projects\n" +
+		Long: "Use an identity for every repo in a folder. Without a folder, bind the current repo\n" +
+			"(or the current folder outside a repo). Without an identity, use the default identity;\n" +
+			"in a terminal, pick one from a list with the default first.",
+		Example: "  git-idm bind                 bind this repo to the default identity\n" +
+			"  git-idm bind work ~/Projects\n" +
 			"  git-idm bind client ~/Projects/acme --temp   end with: git-idm unbind ~/Projects/acme",
-		Args: cobra.RangeArgs(1, 2),
+		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
 			if err != nil {
 				return err
 			}
-			rulePath, err := rulePathFor(args[1:])
+			var rulePath string
+			if len(args) == 2 {
+				rulePath, err = rulePathFor(args[1:])
+			} else {
+				rulePath, err = currentBindPath(c)
+			}
 			if err != nil {
 				return err
 			}
-			rule, err := c.Bind(rulePath, args[0], temporary)
+			name := ""
+			if len(args) > 0 {
+				name = args[0]
+			} else if name, err = pickBindIdentity(cmd, c, rulePath); err != nil {
+				return err
+			}
+			rule, err := c.Bind(rulePath, name, temporary)
 			if err != nil {
 				return err
 			}
@@ -182,6 +199,40 @@ func applyConfig(out io.Writer, c *config.Config) error {
 		fmt.Fprintln(out, "  git config is up to date")
 	}
 	return err
+}
+
+func currentBindPath(c *config.Config) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if root := resolve.Resolve(c, cwd, "").RepoRoot; root != "" {
+		cwd = root
+	}
+	return rulePathFor([]string{cwd})
+}
+
+func pickBindIdentity(cmd *cobra.Command, c *config.Config, rulePath string) (string, error) {
+	if len(c.Identities) == 0 {
+		return "", fmt.Errorf("no identities yet: git-idm add")
+	}
+	prompter, err := newPrompter(cmd)
+	if err != nil {
+		if c.Default == "" {
+			return "", fmt.Errorf("no default identity: git-idm bind <identity>")
+		}
+		return c.Default, nil
+	}
+	var choices []setup.Choice
+	if c.Default != "" {
+		choices = append(choices, setup.Choice{Key: c.Default, Label: c.Default + " (default)  " + c.Identities[c.Default].Email})
+	}
+	for _, name := range c.Names() {
+		if name != c.Default {
+			choices = append(choices, setup.Choice{Key: name, Label: name + "  " + c.Identities[name].Email})
+		}
+	}
+	return prompter.Select("Bind "+rulePath+" to", "git-idm uses this identity for commits, pushes and gh in this folder.", choices, choices[0].Key)
 }
 
 func rulePathFor(args []string) (string, error) {

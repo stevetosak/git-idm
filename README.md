@@ -35,6 +35,7 @@ With Go: `go install github.com/stevetosak/git-idm/cmd/git-idm@latest`
 git-idm init                      # import your git, SSH and gh setup and repo authors
 git-idm add                       # or create a new identity, step by step
 git-idm bind work ~/Projects/work # use "work" for every repo in this folder
+git-idm bind                      # bind this repo to the default identity
 git-idm                           # show the identity for this folder
 git-idm doctor                    # find problems
 ```
@@ -52,6 +53,7 @@ echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 | Command | What it does |
 |---|---|
 | `add`, `edit`, `rm`, `ls` | create, change, remove and list identities |
+| `bind` | bind this repo (or folder) to the default identity, or pick one from a list |
 | `bind <identity> [dir]` | use an identity for every repo in a folder |
 | `bind <identity> [dir] --temp` | use it for a short time, until `unbind` |
 | `unbind [dir]` | stop using an identity in a folder |
