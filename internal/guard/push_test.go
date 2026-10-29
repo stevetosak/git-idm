@@ -140,7 +140,7 @@ func TestPushTransport(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, k := range []string{"GIT_CONFIG_COUNT", "GH_CONFIG_DIR", "GH_TOKEN"} {
+			for _, k := range []string{"GIT_CONFIG_COUNT", "GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 				t.Setenv(k, "")
 				os.Unsetenv(k)
 			}
