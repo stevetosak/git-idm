@@ -69,7 +69,7 @@ Run `git-idm <command> --help` for flags and examples.
 
 - **Config:** identities and folder rules are in `~/.config/git-idm/config.toml`.
 - **git:** `git-idm apply` writes one marked block in `~/.gitconfig` with an `includeIf "gitdir:"` rule for each folder (`gitdir/i:` on macOS). Each rule loads a generated file that sets `user.name`, `user.email`, `core.sshCommand`, the signing key and a `gh` credential helper. git does the switching itself, so git-idm does not need to run for git to work.
-- **gh:** each identity has its own `GH_CONFIG_DIR`. The shell hook sets it when you change folders, so `gh` uses the correct account. Programs that do not run the hook (scripts, editors, AI agents) get the same account through a `gh` shim in `~/.local/bin`, which `apply` installs. The shim refuses `pr create`, `issue create`, comments, reviews, merges and `release create` when gh is logged in to another account (skip once with `GIT_IDM_GH_CHECK=0`).
+- **gh:** each identity has its own `GH_CONFIG_DIR`. The shell hook sets it when you change folders, so `gh` uses the correct account. Programs that do not run the hook (scripts, editors, AI agents) get the same account through a `gh` shim in `~/.local/bin`, which `apply` installs. In a folder with an identity, the shim refuses every gh command (except `auth`, `config`, `help` and `version`) when gh is logged in to another account, when the identity has no gh login, or when `GH_TOKEN` or `GITHUB_TOKEN` is set. Skip the check once with `GIT_IDM_GH_CHECK=0`.
 - **Guard:** with `guard block`, a global pre-commit hook compares the commit author with the identity of the folder. Your repo hooks still run after it.
 
 ## Updates

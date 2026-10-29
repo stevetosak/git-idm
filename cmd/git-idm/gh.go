@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +19,13 @@ const (
 	ghCheckEnv  = "GIT_IDM_GH_CHECK"
 )
 
+var ghTokenEnvs = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+
+var ghUnchecked = map[string]bool{
+	"auth": true, "help": true, "version": true, "config": true, "completion": true,
+	"--version": true, "--help": true, "-h": true,
+}
+
 var execGH = syscall.Exec
 
 func newGHCmd() *cobra.Command {
@@ -33,8 +40,8 @@ func newGHCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env, target := ghEnv(os.Environ(), cmd.ErrOrStderr())
-			if err := checkGHLogin(args, target, envValue(env, ghConfigEnv)); err != nil {
+			env, target := ghEnv(os.Environ())
+			if err := checkGH(args, target, env); err != nil {
 				return err
 			}
 			return execGH(real, append([]string{"gh"}, args...), env)
@@ -46,47 +53,74 @@ type ghTarget struct {
 	name     string
 	identity config.Identity
 	managed  bool
+	err      error
 }
 
-func ghEnv(environ []string, stderr io.Writer) ([]string, ghTarget) {
+func ghEnv(environ []string) ([]string, ghTarget) {
 	c, res, err := current()
-	if err != nil {
-		fmt.Fprintln(stderr, "git-idm: gh runs without a git-idm identity:", err)
+	if errors.Is(err, config.ErrNotFound) {
 		return environ, ghTarget{}
+	}
+	if err != nil {
+		return environ, ghTarget{err: fmt.Errorf("git-idm cannot read its config, so it cannot check the gh login: %w", err)}
 	}
 	if got := envValue(environ, ghConfigEnv); got != "" && !ownedGHDir(c, got) {
 		return environ, ghTarget{}
 	}
 	id, ok := c.Identities[res.Identity]
 	if !ok {
-		return withEnv(environ, ghConfigEnv, ""), ghTarget{}
+		return withEnv(environ, ghConfigEnv, ""), ghTarget{managed: true}
 	}
 	return withEnv(environ, ghConfigEnv, config.ExpandHome(id.GHConfigDir)), ghTarget{name: res.Identity, identity: id, managed: true}
 }
 
-var ghAuthoring = map[string]bool{
-	"pr create": true, "pr comment": true, "pr review": true, "pr merge": true,
-	"issue create": true, "issue comment": true, "release create": true,
+func checkGH(args []string, target ghTarget, environ []string) error {
+	if len(args) == 0 || ghUnchecked[args[0]] || os.Getenv(ghCheckEnv) == "0" {
+		return nil
+	}
+	refuse := func(reason, fix string) error {
+		msg := reason + ", so gh stops here"
+		if fix != "" {
+			msg += "\n  fix:       " + fix
+		}
+		return errors.New(msg + "\n  skip once: " + ghCheckEnv + "=0 gh " + args[0] + " ...")
+	}
+	if target.err != nil {
+		return refuse(target.err.Error(), "git-idm doctor")
+	}
+	if !target.managed {
+		return nil
+	}
+	for _, key := range ghTokenEnvs {
+		if envValue(environ, key) != "" {
+			return refuse(fmt.Sprintf("%s is set: gh would use that token, not the gh login of %s", key, orNone(target.name)), "unset "+key)
+		}
+	}
+	name, id := target.name, target.identity
+	login := "git-idm login " + name
+	switch {
+	case name == "":
+		return refuse("no git-idm identity uses this folder", "git-idm bind <identity>, or set a default identity")
+	case id.GHConfigDir == "":
+		return refuse(name+" has no gh login", login)
+	case id.GHUser == "":
+		return refuse(name+" has no gh_user, git-idm cannot check which account gh uses", login)
+	}
+	user := importer.GHUserFromConfigDir(id.GHConfigDir)
+	switch {
+	case user == "":
+		return refuse(fmt.Sprintf("gh is not logged in for %s (%s)", name, id.GHConfigDir), login)
+	case !strings.EqualFold(user, id.GHUser):
+		return refuse(fmt.Sprintf("gh is logged in as %s, but %s uses %s", user, name, id.GHUser), login)
+	}
+	return nil
 }
 
-func checkGHLogin(args []string, target ghTarget, configDir string) error {
-	if os.Getenv(ghCheckEnv) == "0" || len(args) < 2 || !ghAuthoring[args[0]+" "+args[1]] {
-		return nil
+func orNone(name string) string {
+	if name == "" {
+		return "this folder"
 	}
-	if !target.managed || target.identity.GHUser == "" {
-		return nil
-	}
-	if configDir == "" {
-		configDir = importer.DefaultGHConfigDir()
-	}
-	user := importer.GHUserFromConfigDir(configDir)
-	if user == "" || strings.EqualFold(user, target.identity.GHUser) {
-		return nil
-	}
-	return fmt.Errorf("gh is logged in as %s, but %s uses %s, so `gh %s %s` stops here\n"+
-		"  fix:       git-idm login %s\n"+
-		"  skip once: %s=0 gh %s %s ...",
-		user, target.name, target.identity.GHUser, args[0], args[1], target.name, ghCheckEnv, args[0], args[1])
+	return name
 }
 
 func ownedGHDir(c *config.Config, dir string) bool {
