@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	BlockStart = "# >>> git-idm (generated, do not edit) >>>"
-	BlockEnd   = "# <<< git-idm <<<"
+	UnboundEmail = "no identity here, run: git-idm bind"
+	BlockStart   = "# >>> git-idm (generated, do not edit) >>>"
+	BlockEnd     = "# <<< git-idm <<<"
 )
 
 type Entry struct {
@@ -111,16 +112,25 @@ func RenderIdentity(name string, id config.Identity, bin string, strict bool) st
 	return b.String()
 }
 
-func RenderBlock(c *config.Config, identityFile func(name string) string, hooksDir string) string {
+func RenderBlock(c *config.Config, identityFile func(name string) string, hooksDir, bin string) string {
 	var b strings.Builder
 	b.WriteString(BlockStart + "\n")
 	if hooksDir != "" {
 		b.WriteString("[core]\n")
 		kv(&b, "hooksPath", hooksDir)
-	}
-	if c.Default != "" {
-		b.WriteString("[include]\n")
-		kv(&b, "path", identityFile(c.Default))
+		b.WriteString("[user]\n")
+		kv(&b, "name", "")
+		kv(&b, "email", UnboundEmail)
+		kv(&b, "useConfigOnly", "true")
+		if bin != "" && UsesGH(c) {
+			b.WriteString("[credential \"https://github.com\"]\n")
+			kv(&b, "helper", "")
+			kv(&b, "helper", CredentialHelper(bin, ""))
+			b.WriteString("[core]\n")
+			kv(&b, "sshCommand", SSHWrapper(bin, "", config.Identity{}))
+			b.WriteString("[ssh]\n")
+			kv(&b, "variant", "ssh")
+		}
 	}
 	rules := append([]config.Rule(nil), c.Rules...)
 	sort.SliceStable(rules, func(i, j int) bool { return len(rules[i].Path) < len(rules[j].Path) })

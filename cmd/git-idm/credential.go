@@ -64,6 +64,9 @@ func runCredential(in io.Reader, out, errOut io.Writer, name, action string) err
 		return nil
 	}
 	login := "git-idm login " + name
+	if name == "" {
+		return stop("no identity is bound to this folder", "git-idm bind")
+	}
 	if config.ValidateIdentityName(name) != nil {
 		return stop(fmt.Sprintf("identity name %q is not valid", name), "git-idm apply")
 	}

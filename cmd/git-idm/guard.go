@@ -114,6 +114,10 @@ func newCheckCommitCmd() *cobra.Command {
 			if !c.GuardEnabled() {
 				return nil
 			}
+			if res.Identity == "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "git-idm blocked: no identity is bound to this folder\n  fix:       %s\n  skip once: git commit --no-verify\n", bindHint(res))
+				return errBlocked
+			}
 			dir, _ := os.Getwd()
 			v, err := guard.Check(c, res, dir)
 			if err != nil {

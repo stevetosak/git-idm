@@ -121,7 +121,7 @@ func (a *Applier) Block(c *config.Config) string {
 	if c.GuardEnabled() {
 		hooksDir = config.ContractHome(a.HooksDir())
 	}
-	return RenderBlock(c, func(name string) string { return config.ContractHome(a.IdentityFile(name)) }, hooksDir)
+	return RenderBlock(c, func(name string) string { return config.ContractHome(a.IdentityFile(name)) }, hooksDir, a.Bin)
 }
 
 func (a *Applier) Installed() bool {

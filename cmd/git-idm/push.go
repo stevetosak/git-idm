@@ -45,7 +45,11 @@ func runCheckPush(in io.Reader, w io.Writer, url string) error {
 	}
 	id, ok := c.Identities[res.Identity]
 	if !ok {
-		return nil
+		if c.Guard != config.GuardBlock {
+			fmt.Fprintf(w, "git-idm warning: no identity is bound to this folder\n  fix: %s\n", bindHint(res))
+			return nil
+		}
+		return block("no identity is bound to this folder\n  fix: " + bindHint(res))
 	}
 	updates, err := guard.ParsePushInput(in)
 	if err != nil {

@@ -61,6 +61,12 @@ func newSSHCmd() *cobra.Command {
 }
 
 func sshArgs(name string, args []string, ssh string) ([]string, error) {
+	if name == "" {
+		if isPush(args) {
+			return nil, fmt.Errorf("no identity is bound to this folder, so the push stops here\n  fix: git-idm bind")
+		}
+		return args, nil
+	}
 	if err := config.ValidateIdentityName(name); err != nil {
 		return nil, fmt.Errorf("identity name %q is not valid, so the push stops here", name)
 	}
