@@ -91,6 +91,14 @@ func FindGH(path string, skip ...string) (string, error) {
 	return "", errors.New("gh is not installed or not in PATH")
 }
 
+func RealGH() string {
+	path, err := FindGH(os.Getenv("PATH"))
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 func UsesGH(c *config.Config) bool {
 	for _, id := range c.Identities {
 		if id.GHConfigDir != "" {

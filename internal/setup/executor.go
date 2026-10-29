@@ -16,6 +16,7 @@ import (
 
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/ghauth"
+	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/importer"
 )
 
@@ -37,7 +38,7 @@ func FindTools() Tools {
 	if runtime.GOOS != "darwin" {
 		open = look("xdg-open")
 	}
-	return Tools{GH: look("gh"), SSHKeygen: look("ssh-keygen"), SSH: look("ssh"), Open: open}
+	return Tools{GH: gitgen.RealGH(), SSHKeygen: look("ssh-keygen"), SSH: look("ssh"), Open: open}
 }
 
 type Executor struct {

@@ -112,3 +112,26 @@ func TestShimRunsGitIDMOrFallsBack(t *testing.T) {
 		t.Fatalf("fallback: %v %q", err, out)
 	}
 }
+
+func TestInternalGHSkipsShim(t *testing.T) {
+	home, a, c := shimSetup(t)
+	if _, err := a.Apply(c); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(home, "real", "gh")
+	if got := RealGH(); got != real {
+		t.Fatalf("RealGH = %q, want %q", got, real)
+	}
+	helper := ""
+	for _, e := range IdentityEntries("work", c.Identities["work"], a.Bin) {
+		if e.Name() == "credential.https://github.com.helper" && strings.Contains(e.Value, "git-credential") {
+			helper = e.Value
+		}
+	}
+	if !strings.Contains(helper, ShellQuote(real)+" auth git-credential") {
+		t.Fatalf("credential helper = %q", helper)
+	}
+	if changes, err := a.Apply(c); err != nil || len(changes) != 0 {
+		t.Fatalf("apply after the shim exists must not change files: %v %+v", err, changes)
+	}
+}

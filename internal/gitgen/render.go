@@ -2,7 +2,6 @@ package gitgen
 
 import (
 	"fmt"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -153,7 +152,7 @@ func signingFormat(key string) string {
 }
 
 func ghPath() string {
-	if p, err := exec.LookPath("gh"); err == nil {
+	if p := RealGH(); p != "" {
 		return p
 	}
 	return "gh"
