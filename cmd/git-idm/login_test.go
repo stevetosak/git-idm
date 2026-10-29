@@ -193,7 +193,7 @@ func TestFirstLoginUsesExistingLogin(t *testing.T) {
 		t.Fatalf("identity = %+v\n%s", id, out)
 	}
 	generated, _ := os.ReadFile(filepath.Join(env.home, ".config", "git-idm", "generated", "solo.gitconfig"))
-	if !strings.Contains(string(generated), "GH_CONFIG_DIR='"+filepath.Join(env.home, "gh-p")+"'") {
+	if !strings.Contains(string(generated), " credential 'solo' ") {
 		t.Fatalf("generated config:\n%s", generated)
 	}
 	if strings.Contains(env.calls(), "auth login") {

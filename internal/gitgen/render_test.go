@@ -51,17 +51,30 @@ func TestRenderIdentityQuoting(t *testing.T) {
 	out := RenderIdentity("jo", config.Identity{
 		Name: `Jo "JJ" \ Doe ; # x`, Email: "jo@x.example",
 		SSHKey: "~/.ssh/it's key", Protocol: config.ProtocolSSH, GHConfigDir: "~/.config/gh-p",
-	}, "/opt/my bin/git-idm")
+	}, "/opt/my bin/git-idm", false)
 	for _, want := range []string{
 		`name = "Jo \"JJ\" \\ Doe ; # x"`,
 		`sshCommand = "ssh -i '/h/u/.ssh/it'\\''s key' -o IdentitiesOnly=yes"`,
 		"[url \"git@github.com:\"]\n\tinsteadOf = \"https://github.com/\"",
-		"[credential \"https://github.com\"]\n\thelper = \"\"\n\thelper = \"!GH_CONFIG_DIR='/h/u/.config/gh-p' ",
-		"\thelper = \"!test -x '/opt/my bin/git-idm' || exit 0; '/opt/my bin/git-idm' credential-hint 'jo'\"",
+		"[credential \"https://github.com\"]\n\thelper = \"\"\n\thelper = " + gitQuote(CredentialHelper("/opt/my bin/git-idm", "jo")) + "\n",
+		`exec '/opt/my bin/git-idm' credential 'jo' \"$@\"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s\nin:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "GH_CONFIG_DIR") || strings.Count(out, "helper =") != 2 {
+		t.Errorf("only the reset and the git-idm helper are allowed:\n%s", out)
+	}
+}
+
+func TestRenderIdentityStrictCredential(t *testing.T) {
+	plain := config.Identity{Name: "P", Email: "p@x.example"}
+	if out := RenderIdentity("plain", plain, "/bin/git-idm", false); strings.Contains(out, "credential") {
+		t.Errorf("no gh in the config: no helper expected:\n%s", out)
+	}
+	if out := RenderIdentity("plain", plain, "/bin/git-idm", true); !strings.Contains(out, "credential 'plain'") {
+		t.Errorf("gh in the config: every identity needs the helper:\n%s", out)
 	}
 }
 

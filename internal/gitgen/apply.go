@@ -82,7 +82,7 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 		return nil, err
 	}
 	for _, name := range c.Names() {
-		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(name, c.Identities[name], a.Bin), false)
+		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(name, c.Identities[name], a.Bin, UsesGH(c)), false)
 		if err != nil {
 			return changes, err
 		}

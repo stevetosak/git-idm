@@ -123,7 +123,7 @@ func TestInternalGHSkipsShim(t *testing.T) {
 		t.Fatalf("RealGH = %q, want %q", got, real)
 	}
 	helper := ""
-	for _, e := range IdentityEntries("work", c.Identities["work"], a.Bin) {
+	for _, e := range IdentityEntries("work", c.Identities["work"], "", false) {
 		if e.Name() == "credential.https://github.com.helper" && strings.Contains(e.Value, "git-credential") {
 			helper = e.Value
 		}

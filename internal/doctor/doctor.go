@@ -66,7 +66,7 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 
 	tokens := checkTokens(c, env.GHAccount)
 	for _, name := range c.Names() {
-		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens)...)
+		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens, gitgen.UsesGH(c))...)
 	}
 
 	for _, r := range c.Rules {
@@ -133,12 +133,12 @@ func ruleIdentity(c *config.Config, path string) string {
 	return ""
 }
 
-func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult) []Check {
+func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult, strict bool) []Check {
 	var checks []Check
 	add := func(level Level, fix, format string, args ...any) {
 		checks = append(checks, Check{Level: level, Text: name + ": " + fmt.Sprintf(format, args...), Fix: fix})
 	}
-	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(name, id, a.Bin) {
+	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(name, id, a.Bin, strict) {
 		add(Warn, "git-idm apply", "generated git config is missing or out of date")
 	}
 	if id.SSHKey != "" {
