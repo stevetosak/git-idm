@@ -6,7 +6,10 @@ import (
 	"path/filepath"
 )
 
-const CheckCommand = "check-commit"
+const (
+	CheckCommand     = "check-commit"
+	PushCheckCommand = "check-push"
+)
 
 var HookNames = []string{
 	"applypatch-msg", "pre-applypatch", "post-applypatch",
@@ -30,10 +33,22 @@ case "$hook" in
       echo "git-idm: identity guard skipped, "` + q + `" not found (run: git-idm doctor)" >&2
     fi
     ;;
+  pre-push)
+    input=$(cat)
+    if [ -x ` + q + ` ]; then
+      printf '%s\n' "$input" | ` + q + ` ` + PushCheckCommand + ` "$@" || exit 1
+    else
+      echo "git-idm: push guard skipped, "` + q + `" not found (run: git-idm doctor)" >&2
+    fi
+    ;;
 esac
 common=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
 repo_hook="$common/hooks/$hook"
 if [ -x "$repo_hook" ]; then
+  if [ "$hook" = pre-push ]; then
+    printf '%s\n' "$input" | "$repo_hook" "$@"
+    exit $?
+  fi
   exec "$repo_hook" "$@"
 fi
 exit 0

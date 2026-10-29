@@ -19,8 +19,8 @@ var errBlocked = errors.New("commit blocked by git-idm guard")
 func newGuardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:       "guard [block|warn|off]",
-		Short:     "Stop commits with the wrong author",
-		Long:      "block: stop commits with the wrong author. warn: print a warning only. off: no check.\nWith no argument, show the current mode.",
+		Short:     "Stop commits and pushes with the wrong identity",
+		Long:      "block: stop commits and pushes with the wrong identity. warn: print a warning only. off: no check.\nWith no argument, show the current mode.",
 		Args:      cobra.MaximumNArgs(1),
 		ValidArgs: []string{string(config.GuardBlock), string(config.GuardWarn), string(config.GuardOff)},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -103,9 +103,13 @@ func newCheckCommitCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, res, err := current()
-			if err != nil {
+			if errors.Is(err, config.ErrNotFound) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "git-idm: guard skipped:", err)
 				return nil
+			}
+			if err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "git-idm blocked: the guard cannot read its config:", err, "\n  skip once: git commit --no-verify")
+				return errBlocked
 			}
 			if !c.GuardEnabled() {
 				return nil
@@ -113,6 +117,10 @@ func newCheckCommitCmd() *cobra.Command {
 			dir, _ := os.Getwd()
 			v, err := guard.Check(c, res, dir)
 			if err != nil {
+				if c.Guard == config.GuardBlock {
+					fmt.Fprintln(cmd.ErrOrStderr(), "git-idm blocked: the guard cannot check this commit:", err, "\n  skip once: git commit --no-verify")
+					return errBlocked
+				}
 				fmt.Fprintln(cmd.ErrOrStderr(), "git-idm: guard skipped:", err)
 				return nil
 			}
@@ -144,7 +152,16 @@ func printMismatch(w io.Writer, c *config.Config, res resolve.Result, v guard.Ve
 		label = "blocked"
 	}
 	fmt.Fprintf(w, "git-idm %s: this commit uses the wrong identity\n", label)
-	fmt.Fprintf(w, "  author:   %s  (from %s)\n", v.Actual, from)
+	if !v.Accepts(v.Actual) {
+		fmt.Fprintf(w, "  author:   %s  (from %s)\n", v.Actual, from)
+	}
+	if v.Committer != "" && !v.Accepts(v.Committer) {
+		committerFrom := "git config"
+		if os.Getenv("GIT_COMMITTER_EMAIL") != "" {
+			committerFrom = "GIT_COMMITTER_EMAIL"
+		}
+		fmt.Fprintf(w, "  committer: %s  (from %s)\n", v.Committer, committerFrom)
+	}
 	fmt.Fprintf(w, "  expected: %s <%s>  (%s)\n", v.ExpectedFrom, v.Expected, reason(res))
 	fmt.Fprintln(w, "  fix one of:")
 	fix := func(command, text string) { fmt.Fprintf(w, "    %-42s %s\n", command, text) }

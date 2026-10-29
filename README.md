@@ -58,7 +58,7 @@ echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 | `use <identity>` | switch identity in this shell only |
 | `doctor` | check keys, gh logins, tokens, hooks, the shell and repo configs |
 | `login [identity]` | log in to GitHub again when a token stops working |
-| `guard block\|warn\|off` | stop or warn about commits with the wrong author |
+| `guard block\|warn\|off` | stop or warn about commits and pushes with the wrong identity |
 | `allow` | accept the author that one repo sets itself |
 | `init`, `migrate` | import your old setup and repo authors, then remove them |
 | `update` | update to the latest release |
@@ -68,9 +68,9 @@ Run `git-idm <command> --help` for flags and examples.
 ## How it works
 
 - **Config:** identities and folder rules are in `~/.config/git-idm/config.toml`.
-- **git:** `git-idm apply` writes one marked block in `~/.gitconfig` with an `includeIf "gitdir:"` rule for each folder (`gitdir/i:` on macOS). Each rule loads a generated file that sets `user.name`, `user.email`, `core.sshCommand`, the signing key and a `gh` credential helper. git does the switching itself, so git-idm does not need to run for git to work.
+- **git:** `git-idm apply` writes one marked block in `~/.gitconfig` with an `includeIf "gitdir:"` rule for each folder (`gitdir/i:` on macOS). Each rule loads a generated file that sets `user.name`, `user.email`, `core.sshCommand`, the signing key, a credential helper that gives git only the identity's GitHub token (or stops git), and an SSH command that checks the GitHub account of the key before each push. git does the switching itself.
 - **gh:** each identity has its own `GH_CONFIG_DIR`. The shell hook sets it when you change folders, so `gh` uses the correct account. Programs that do not run the hook (scripts, editors, AI agents) get the same account through a `gh` shim in `~/.local/bin`, which `apply` installs. In a folder with an identity, the shim refuses every gh command (except `auth`, `config`, `help` and `version`) when gh is logged in to another account, when the identity has no gh login, or when `GH_TOKEN` or `GITHUB_TOKEN` is set. Skip the check once with `GIT_IDM_GH_CHECK=0`.
-- **Guard:** with `guard block`, a global pre-commit hook compares the commit author with the identity of the folder. Your repo hooks still run after it.
+- **Guard:** with `guard block`, a global pre-commit hook compares the commit author and committer with the identity of the folder. A global pre-push hook checks every commit that no remote has yet, and stops pushes that skip the git-idm account checks (a token in the remote URL, `GIT_SSH_COMMAND`, or a credential helper or `core.sshCommand` given with `-c`). Your repo hooks still run after it.
 
 ## Updates
 
@@ -87,6 +87,7 @@ Set `GIT_IDM_NO_UPDATE_CHECK=1` to turn off the daily check.
 
 ```sh
 rm ~/.local/bin/git-idm
+rm ~/.local/bin/gh        # the gh shim, only if git-idm made it
 rm -rf ~/.config/git-idm
 ```
 
