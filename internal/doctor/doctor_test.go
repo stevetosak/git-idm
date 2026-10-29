@@ -222,7 +222,10 @@ func TestDoctorFindsLocalKeysUnderRules(t *testing.T) {
 	if ch := find(checks, "~/Projects/named: .git/config sets user.name over the work rule"); ch == nil || ch.Fix != "git-idm migrate" {
 		t.Errorf("named: got %+v", ch)
 	}
-	for _, substr := range []string{"~/Projects/allowed", "~/outside", "sets author"} {
+	if ch := find(checks, "1 repo(s) have no identity, they use your own git config: ~/outside/"); ch == nil || ch.Level != Info {
+		t.Errorf("unbound repo: got %+v", ch)
+	}
+	for _, substr := range []string{"~/Projects/allowed", "~/outside:", "sets author"} {
 		if ch := find(checks, substr); ch != nil {
 			t.Errorf("%q must not be reported: %+v", substr, ch)
 		}

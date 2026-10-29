@@ -99,6 +99,7 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	}
 	local := localChecks(c)
 	checks = append(checks, local...)
+	checks = append(checks, unboundChecks(c)...)
 	if res.RepoRoot != "" {
 		checks = append(checks, repoChecks(c, res, local)...)
 	}
@@ -122,6 +123,33 @@ func localChecks(c *config.Config) []Check {
 		checks = append(checks, Check{Level: Warn, Text: text, Fix: fix})
 	}
 	return checks
+}
+
+func unboundChecks(c *config.Config) []Check {
+	if len(c.Identities) == 0 {
+		return nil
+	}
+	groups := importer.UnboundGroups(c, importer.ScanHome().Repos)
+	if len(groups) == 0 {
+		return nil
+	}
+	repos := 0
+	var paths []string
+	for _, g := range groups {
+		repos += len(g.Repos)
+		if len(paths) < 5 {
+			paths = append(paths, g.RulePath())
+		}
+	}
+	if len(groups) > len(paths) {
+		paths = append(paths, fmt.Sprintf("+%d more", len(groups)-len(paths)))
+	}
+	level, effect := Info, "they use your own git config"
+	if c.GuardEnabled() {
+		level, effect = Warn, "git refuses to commit there"
+	}
+	return []Check{{Level: level, Text: fmt.Sprintf("%d repo(s) have no identity, %s: %s", repos, effect, strings.Join(paths, ", ")),
+		Fix: "git-idm migrate (binds them), or git-idm bind in each repo"}}
 }
 
 func ruleIdentity(c *config.Config, path string) string {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stevetosak/git-idm/internal/config"
@@ -126,7 +127,7 @@ func newMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Remove the old setup that git-idm replaced",
-		Long:  "Remove old includeIf entries, identity files, .envrc lines and repo author keys that git-idm rules now cover.\nEvery changed file is backed up first.",
+		Long:  "Remove old includeIf entries, identity files, .envrc lines and repo author keys that git-idm rules now cover.\nEvery changed file is backed up first. Then offer to bind repos that have no identity yet.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := config.Load()
@@ -147,18 +148,103 @@ func newMigrateCmd() *cobra.Command {
 				fmt.Fprintln(out, "repo scan stopped early, run migrate again for the rest")
 			}
 			legacy := mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, scan.Repos))
-			if len(legacy) == 0 {
+			home := importer.ScanHome()
+			groups := importer.UnboundGroups(c, home.Repos)
+			if len(legacy) == 0 && len(groups) == 0 {
 				fmt.Fprintln(out, "nothing to migrate")
 				return nil
 			}
-			steps, err := migrate.Run(c, a, legacy, opts)
-			printSteps(out, steps)
-			return err
+			if len(legacy) > 0 {
+				steps, err := migrate.Run(c, a, legacy, opts)
+				printSteps(out, steps)
+				if err != nil {
+					return err
+				}
+			}
+			return bindUnbound(cmd, out, c, groups, opts.DryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Envrc, "envrc", false, "also migrate GH_CONFIG_DIR out of .envrc files")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "show what would change")
 	return cmd
+}
+
+func bindUnbound(cmd *cobra.Command, out io.Writer, c *config.Config, groups []importer.UnboundGroup, dryRun bool) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	fmt.Fprintln(out, "\nRepos without an identity (git refuses to commit there while the guard is on):")
+	for _, g := range groups {
+		fmt.Fprintf(out, "  %s  %s\n", g.RulePath(), repoCount(g))
+	}
+	prompter, err := newPrompter(cmd)
+	if dryRun || err != nil {
+		fmt.Fprintln(out, "\nBind them with:")
+		for _, g := range groups {
+			name := g.Suggested
+			if name == "" {
+				name = "<identity>"
+			}
+			fmt.Fprintf(out, "  git-idm bind %s %s\n", name, g.RulePath())
+		}
+		return nil
+	}
+	var bound []string
+	for _, g := range groups {
+		var choices []setup.Choice
+		if g.Suggested != "" {
+			choices = append(choices, setup.Choice{Key: g.Suggested, Label: g.Suggested + " (suggested)  " + c.Identities[g.Suggested].Email})
+		}
+		for _, name := range c.Names() {
+			if name != g.Suggested {
+				choices = append(choices, setup.Choice{Key: name, Label: name + "  " + c.Identities[name].Email})
+			}
+		}
+		choices = append(choices, setup.Choice{Key: "", Label: "Skip, leave it without an identity"})
+		pick, err := prompter.Select("Bind "+g.RulePath(), repoCount(g)+": "+strings.Join(contractAll(g.Repos, 3), ", "), choices, choices[0].Key)
+		if err != nil {
+			if len(bound) == 0 {
+				return ignoreAbort(err)
+			}
+			break
+		}
+		if pick == "" {
+			continue
+		}
+		if _, err := c.Bind(g.RulePath(), pick, false); err != nil {
+			return err
+		}
+		bound = append(bound, fmt.Sprintf("bound %s to %s", g.RulePath(), pick))
+	}
+	if len(bound) == 0 {
+		return nil
+	}
+	if err := c.Save(); err != nil {
+		return err
+	}
+	for _, line := range bound {
+		fmt.Fprintln(out, "  "+line)
+	}
+	return applyConfig(out, c)
+}
+
+func repoCount(g importer.UnboundGroup) string {
+	if len(g.Repos) == 1 {
+		return "1 repo"
+	}
+	return fmt.Sprintf("%d repos", len(g.Repos))
+}
+
+func contractAll(paths []string, max int) []string {
+	var out []string
+	for i, p := range paths {
+		if i == max {
+			out = append(out, fmt.Sprintf("+%d more", len(paths)-max))
+			break
+		}
+		out = append(out, config.ContractHome(p))
+	}
+	return out
 }
 
 func printSteps(out io.Writer, steps []migrate.Step) {

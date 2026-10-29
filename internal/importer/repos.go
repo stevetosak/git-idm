@@ -67,7 +67,7 @@ func (r *Result) importRepos(global gitConfig, opts Options) {
 		if !ok {
 			continue
 		}
-		rules, mixed := suggestRules(repos, effective, key, home)
+		rules, mixed := suggestRules(repos, effective, key, strings.EqualFold(r.Config.Identities[r.Config.Default].Email, key), home)
 		for _, dir := range rules {
 			r.addRepoRule(dir, name, key)
 		}
@@ -134,9 +134,6 @@ func (r *Result) inheritedEmail(dir string) string {
 			best, email = prefix, r.Config.Identities[rule.Identity].Email
 		}
 	}
-	if best == "" && r.Config.Default != "" {
-		email = r.Config.Identities[r.Config.Default].Email
-	}
 	return strings.ToLower(email)
 }
 
@@ -150,10 +147,10 @@ func enclosingEmail(repos []localid.Repo, root string) string {
 	return email
 }
 
-func suggestRules(repos []localid.Repo, effective map[string]string, email, home string) (rules, mixed []string) {
+func suggestRules(repos []localid.Repo, effective map[string]string, email string, isDefault bool, home string) (rules, mixed []string) {
 	pure := func(dir string) bool {
 		for root, e := range effective {
-			if e != email && under(root, dir) {
+			if e != email && !(e == "" && isDefault) && under(root, dir) {
 				return false
 			}
 		}
