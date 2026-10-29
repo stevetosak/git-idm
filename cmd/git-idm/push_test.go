@@ -22,6 +22,9 @@ guard = "block"
 [identities.work]
   name = "W"
   email = "w@x.example"
+[[rules]]
+  path = "~/repo/"
+  identity = "work"
 `
 	os.MkdirAll(filepath.Join(home, ".config", "git-idm"), 0o700)
 	os.WriteFile(filepath.Join(home, ".config", "git-idm", "config.toml"), []byte(cfg), 0o600)

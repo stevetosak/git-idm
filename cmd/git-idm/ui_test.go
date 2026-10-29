@@ -70,15 +70,19 @@ func TestStatusViewDefaultNoneAndWelcome(t *testing.T) {
 	uiEnv(t)
 	t.Setenv("GH_CONFIG_DIR", "/h/.config/gh")
 	c := uiConfig()
-	got := statusView(plain(), c, resolve.Result{Identity: "work", Source: resolve.SourceDefault, RepoRoot: "/h/x", LocalUser: "Martin", LocalEmail: "m@x.example"})
-	for _, want := range []string{"why   ★ default (no rule matches here)", "! commits here use Martin <m@x.example> from .git/config, not work"} {
+	got := statusView(plain(), c, resolve.Result{Identity: "work", Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/x/", Identity: "work"}, RepoRoot: "/h/x", LocalUser: "Martin", LocalEmail: "m@x.example"})
+	for _, want := range []string{"why   rule ~/x/", "! commits here use Martin <m@x.example> from .git/config, not work"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
+	got = statusView(plain(), c, resolve.Result{Source: resolve.SourceNone, Suggested: "work"})
+	if !strings.Contains(got, "○ no identity here") || !strings.Contains(got, "git-idm bind  (binds this folder to work)") {
+		t.Errorf("no identity with a default:\n%s", got)
+	}
 	got = statusView(plain(), c, resolve.Result{Source: resolve.SourceNone})
-	if !strings.Contains(got, "○ no identity here") || !strings.Contains(got, "git-idm bind <identity> .") {
-		t.Errorf("no identity:\n%s", got)
+	if !strings.Contains(got, "git-idm bind <identity>") {
+		t.Errorf("no identity without a default:\n%s", got)
 	}
 	if got := welcome(plain(), nil); !strings.Contains(got, "No identities yet.") || !strings.Contains(got, "git-idm add") || strings.Contains(got, "init") {
 		t.Errorf("welcome without an old setup:\n%s", got)

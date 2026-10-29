@@ -89,6 +89,9 @@ func clearOverride(sh Shell) string {
 
 func Segment(sh Shell, c *config.Config, res resolve.Result) string {
 	if res.Identity == "" {
+		if res.Source == resolve.SourceNone && len(c.Identities) > 0 {
+			return paint(sh, "no identity", "red", true)
+		}
 		return ""
 	}
 	color := c.Identities[res.Identity].Color

@@ -41,7 +41,7 @@ func TestResolve(t *testing.T) {
 		{"P/a", "", "personal", SourceRule, "P/a"},
 		{"P/plain", "", "personal", SourceRule, ""},
 		{"P/deep/x", "", "deep", SourceRule, "P/deep/x"},
-		{"W/r/sub", "", "work", SourceDefault, "W/r"},
+		{"W/r/sub", "", "", SourceNone, "W/r"},
 		{"P/a", "work", "work", SourceOverride, "P/a"},
 	}
 	for _, tc := range cases {
@@ -56,6 +56,12 @@ func TestResolve(t *testing.T) {
 		if res.RepoRoot != wantRepo {
 			t.Errorf("%s: repo %q, want %q", tc.dir, res.RepoRoot, wantRepo)
 		}
+	}
+	if res := Resolve(c, filepath.Join(home, "W/r"), ""); res.Suggested != c.Default || c.Default == "" {
+		t.Errorf("unbound folder must suggest the default %q, got %q", c.Default, res.Suggested)
+	}
+	if res := Resolve(c, filepath.Join(home, "P/a"), ""); res.Suggested != "" {
+		t.Errorf("a bound folder suggests nothing, got %q", res.Suggested)
 	}
 	if res := Resolve(c, filepath.Join(home, "P/a"), "work"); res.RuleIdentity != "personal" {
 		t.Errorf("override must still report the rule identity, got %q", res.RuleIdentity)

@@ -12,6 +12,7 @@ import (
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/importer"
+	"github.com/stevetosak/git-idm/internal/resolve"
 )
 
 const (
@@ -50,6 +51,7 @@ func newGHCmd() *cobra.Command {
 }
 
 type ghTarget struct {
+	res      resolve.Result
 	name     string
 	identity config.Identity
 	managed  bool
@@ -69,9 +71,9 @@ func ghEnv(environ []string) ([]string, ghTarget) {
 	}
 	id, ok := c.Identities[res.Identity]
 	if !ok {
-		return withEnv(environ, ghConfigEnv, ""), ghTarget{managed: true}
+		return withEnv(environ, ghConfigEnv, ""), ghTarget{res: res, managed: true}
 	}
-	return withEnv(environ, ghConfigEnv, config.ExpandHome(id.GHConfigDir)), ghTarget{name: res.Identity, identity: id, managed: true}
+	return withEnv(environ, ghConfigEnv, config.ExpandHome(id.GHConfigDir)), ghTarget{res: res, name: res.Identity, identity: id, managed: true}
 }
 
 func checkGH(args []string, target ghTarget, environ []string) error {
@@ -100,7 +102,7 @@ func checkGH(args []string, target ghTarget, environ []string) error {
 	login := "git-idm login " + name
 	switch {
 	case name == "":
-		return refuse("no git-idm identity uses this folder", "git-idm bind <identity>, or set a default identity")
+		return refuse("no identity is bound to this folder", bindHint(target.res))
 	case id.GHConfigDir == "":
 		return refuse(name+" has no gh login", login)
 	case id.GHUser == "":

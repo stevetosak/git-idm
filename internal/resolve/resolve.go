@@ -17,7 +17,6 @@ type Source string
 const (
 	SourceOverride Source = "override"
 	SourceRule     Source = "rule"
-	SourceDefault  Source = "default"
 	SourceNone     Source = "none"
 )
 
@@ -29,6 +28,7 @@ type Result struct {
 	RepoRoot     string
 	LocalUser    string
 	LocalEmail   string
+	Suggested    string
 }
 
 func (r Result) Temporary() bool {
@@ -52,10 +52,9 @@ func Resolve(c *config.Config, cwd, override string) Result {
 		res.Identity, res.Source = override, SourceOverride
 	case res.Rule != nil:
 		res.Identity, res.Source = res.Rule.Identity, SourceRule
-	case c.Default != "":
-		res.Identity, res.Source = c.Default, SourceDefault
 	default:
 		res.Source = SourceNone
+		res.Suggested = c.Default
 	}
 	return res
 }

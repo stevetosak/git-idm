@@ -41,7 +41,7 @@ func find(checks []Check, substr string) *Check {
 
 func run(c *config.Config, a *gitgen.Applier, env map[string]string) []Check {
 	_, hook := env["_GIT_IDM_SEGMENT"]
-	return Run(c, a, resolve.Result{Identity: c.Default, Source: resolve.SourceDefault},
+	return Run(c, a, resolve.Result{Identity: c.Default, Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/", Identity: c.Default}},
 		Env{Getenv: func(k string) string { return env[k] }, HookHint: "hint", ShellHook: hook})
 }
 
@@ -158,7 +158,7 @@ func TestDoctorChecksTokens(t *testing.T) {
 		}
 		return ghauth.Account{Login: "w-gh", Scopes: []string{"admin:public_key"}}, nil
 	}
-	checks := Run(c, a, resolve.Result{Identity: "work", Source: resolve.SourceDefault},
+	checks := Run(c, a, resolve.Result{Identity: "work", Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/", Identity: "work"}},
 		Env{Getenv: func(string) string { return "" }, GHAccount: fetch})
 
 	want := []struct {

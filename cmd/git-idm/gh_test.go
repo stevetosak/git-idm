@@ -111,7 +111,8 @@ func TestGHEnvFollowsFolder(t *testing.T) {
 	}{
 		{"client/repo", home + "/gh-work", "", home + "/gh-client"},
 		{"client/repo", "", "", home + "/gh-client"},
-		{"other", home + "/gh-client", "", home + "/gh-work"},
+		{"other", home + "/gh-client", "", "<unset>"},
+		{"other", home + "/gh-client", "work", home + "/gh-work"},
 		{"plain", home + "/gh-work", "", "<unset>"},
 		{"client/repo", "/my/own/gh", "", "/my/own/gh"},
 		{"client/repo", home + "/gh-client", "work", home + "/gh-work"},
@@ -204,11 +205,12 @@ func TestGHFailsClosed(t *testing.T) {
 		{name: "skip once", dir: "plain", setup: func(t *testing.T, home string) { t.Setenv(ghCheckEnv, "0") }, args: []string{"pr", "create"}},
 		{name: "auth is never checked", dir: "plain", args: []string{"auth", "login"}},
 		{name: "version is never checked", dir: "plain", args: []string{"--version"}},
-		{name: "no identity", dir: "other", setup: func(t *testing.T, home string) {
+		{name: "unbound folder", dir: "other", args: []string{"pr", "list"}, want: "no identity is bound to this folder, so gh stops here\n  fix:       git-idm bind  (binds this folder to work)"},
+		{name: "unbound folder without default", dir: "other", setup: func(t *testing.T, home string) {
 			c, _ := config.Load()
 			c.Default = ""
 			c.Save()
-		}, args: []string{"pr", "list"}, want: "no git-idm identity uses this folder"},
+		}, args: []string{"pr", "list"}, want: "fix:       git-idm bind <identity>"},
 		{name: "broken config", dir: "other", setup: func(t *testing.T, home string) {
 			os.WriteFile(filepath.Join(home, ".config", "git-idm", "config.toml"), []byte("not toml ["), 0o600)
 		}, args: []string{"pr", "list"}, want: "git-idm cannot read its config"},

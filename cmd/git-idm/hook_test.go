@@ -181,6 +181,9 @@ func hookHome(t *testing.T) (home, bin string) {
 [[rules]]
   path = "~/P/"
   identity = "personal"
+[[rules]]
+  path = "~/W/"
+  identity = "work"
 `
 	for _, d := range []string{".config/git-idm", "P/repo", "W/repo"} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {

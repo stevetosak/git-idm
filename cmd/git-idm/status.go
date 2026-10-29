@@ -62,8 +62,8 @@ func statusView(t *ui.Theme, c *config.Config, res resolve.Result) string {
 	var b strings.Builder
 	if res.Identity == "" {
 		body := t.Bold("○ no identity here") + "\n\n" + ui.Rows(t, [][2]string{
-			{"why", "no rule matches and there is no default"},
-			{"fix", "git-idm bind <identity> .  or  git-idm edit <identity> --default"},
+			{"why", "no rule binds this folder, so git-idm stops commits, pushes and gh here"},
+			{"fix", bindHint(res)},
 		})
 		if res.RepoRoot != "" {
 			body += "\n" + ui.Rows(t, [][2]string{{"repo", config.ContractHome(res.RepoRoot)}})
@@ -125,8 +125,6 @@ func whyText(t *ui.Theme, res resolve.Result) string {
 			return "temporary rule " + res.Rule.Path
 		}
 		return "rule " + res.Rule.Path
-	case resolve.SourceDefault:
-		return "★ default (no rule matches here)"
 	}
 	return "none"
 }
@@ -147,6 +145,8 @@ func newPromptCmd() *cobra.Command {
 			}
 			label := res.Identity
 			switch {
+			case res.Identity == "":
+				label = "no identity"
 			case res.Source == resolve.SourceOverride:
 				label += " (override)"
 			case res.Temporary():
@@ -156,6 +156,13 @@ func newPromptCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func bindHint(res resolve.Result) string {
+	if res.Suggested != "" {
+		return "git-idm bind  (binds this folder to " + res.Suggested + ")"
+	}
+	return "git-idm bind <identity>"
 }
 
 func reason(res resolve.Result) string {
@@ -171,10 +178,8 @@ func reason(res resolve.Result) string {
 			return "temporary rule " + res.Rule.Path
 		}
 		return "rule " + res.Rule.Path
-	case resolve.SourceDefault:
-		return "default (no rule matches)"
 	}
-	return "none"
+	return "no rule binds this folder"
 }
 
 func notes(c *config.Config, res resolve.Result) []string {
