@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +13,7 @@ import (
 	"github.com/stevetosak/git-idm/internal/gitgen"
 )
 
-const (
-	ghConfigEnv = "GH_CONFIG_DIR"
-	ghShimEnv   = "GIT_IDM_GH_SHIM"
-)
+const ghConfigEnv = "GH_CONFIG_DIR"
 
 var execGH = syscall.Exec
 
@@ -29,7 +25,7 @@ func newGHCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			self, _ := gitgen.Executable()
-			real, err := findGH(os.Getenv("PATH"), os.Getenv(ghShimEnv), self)
+			real, err := gitgen.FindGH(os.Getenv("PATH"), os.Getenv(gitgen.ShimEnv), self)
 			if err != nil {
 				return err
 			}
@@ -37,34 +33,6 @@ func newGHCmd() *cobra.Command {
 			return execGH(real, append([]string{"gh"}, args...), env)
 		},
 	}
-}
-
-func findGH(path string, skip ...string) (string, error) {
-	skipped := map[string]bool{}
-	for _, s := range skip {
-		if s == "" {
-			continue
-		}
-		if resolved, err := filepath.EvalSymlinks(s); err == nil {
-			skipped[resolved] = true
-		}
-	}
-	for _, dir := range filepath.SplitList(path) {
-		if !filepath.IsAbs(dir) {
-			continue
-		}
-		candidate := filepath.Join(dir, "gh")
-		info, err := os.Stat(candidate)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		resolved, err := filepath.EvalSymlinks(candidate)
-		if err != nil || skipped[resolved] {
-			continue
-		}
-		return candidate, nil
-	}
-	return "", errors.New("gh is not installed or not in PATH")
 }
 
 func ghEnv(environ []string, stderr io.Writer) []string {

@@ -37,6 +37,7 @@ type Env struct {
 	HookHint  string
 	ShellHook bool
 	GHAccount func(dir string) (ghauth.Account, error)
+	LookPath  func(string) (string, error)
 }
 
 type tokenResult struct {
@@ -80,6 +81,8 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	}
 
 	checks = append(checks, guardChecks(c, a, string(global))...)
+
+	checks = append(checks, shimChecks(c, a, env.LookPath)...)
 
 	if env.ShellHook {
 		add(OK, "", "shell hook is active")
@@ -202,6 +205,33 @@ func checkTokens(c *config.Config, fetch func(string) (ghauth.Account, error)) m
 	}
 	wg.Wait()
 	return results
+}
+
+func shimChecks(c *config.Config, a *gitgen.Applier, lookPath func(string) (string, error)) []Check {
+	shim := a.ShimPath()
+	if shim == "" || lookPath == nil || !gitgen.UsesGH(c) {
+		return nil
+	}
+	path := config.ContractHome(shim)
+	found, err := lookPath("gh")
+	if err != nil {
+		return nil
+	}
+	_, statErr := os.Lstat(shim)
+	switch {
+	case statErr != nil:
+		return []Check{{Level: Warn, Text: "gh shim is missing: gh outside the shell hook (scripts, editors, AI agents) uses the wrong login", Fix: "git-idm apply"}}
+	case !gitgen.IsShim(shim):
+		return []Check{{Level: Info, Text: path + " is not made by git-idm: gh outside the shell hook does not follow the folder"}}
+	}
+	if data, _ := os.ReadFile(shim); string(data) != gitgen.RenderShim(a.Bin) {
+		return []Check{{Level: Warn, Text: "gh shim is out of date", Fix: "git-idm apply"}}
+	}
+	if real, err := filepath.EvalSymlinks(found); err != nil || !gitgen.IsShim(real) {
+		return []Check{{Level: Warn, Text: fmt.Sprintf("gh in PATH is %s, not the git-idm shim", config.ContractHome(found)),
+			Fix: "put " + config.ContractHome(a.BinDir) + " first in PATH"}}
+	}
+	return []Check{{Level: OK, Text: "gh follows the folder in all programs (" + path + ")"}}
 }
 
 func guardChecks(c *config.Config, a *gitgen.Applier, global string) []Check {

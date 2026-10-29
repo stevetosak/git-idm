@@ -21,6 +21,7 @@ type Applier struct {
 	ConfigDir    string
 	GlobalConfig string
 	Bin          string
+	BinDir       string
 	Now          func() time.Time
 	backupDir    string
 	backedUp     map[string]string
@@ -39,7 +40,7 @@ func NewApplier() (*Applier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, Now: time.Now}, nil
+	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, BinDir: DefaultBinDir(), Now: time.Now}, nil
 }
 
 func Executable() (string, error) {
@@ -94,6 +95,11 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	}
 	hooks, err := a.syncHooks(c.GuardEnabled())
 	changes = append(changes, hooks...)
+	if err != nil {
+		return changes, err
+	}
+	shim, err := a.syncShim(c)
+	changes = append(changes, shim...)
 	if err != nil {
 		return changes, err
 	}

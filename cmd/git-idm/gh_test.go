@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stevetosak/git-idm/internal/config"
+	"github.com/stevetosak/git-idm/internal/gitgen"
 )
 
 func executable(t *testing.T, path string) {
@@ -40,11 +41,11 @@ func TestFindGHSkipsShimAndSelf(t *testing.T) {
 	executable(t, real)
 
 	path := strings.Join([]string{"relative", filepath.Join(dir, "shim"), filepath.Join(dir, "bin"), filepath.Join(dir, "noexec"), filepath.Join(dir, "real")}, string(os.PathListSeparator))
-	got, err := findGH(path, shim, self)
+	got, err := gitgen.FindGH(path, shim, self)
 	if err != nil || got != real {
 		t.Fatalf("findGH = %q, %v; want %q", got, err, real)
 	}
-	if _, err := findGH(filepath.Join(dir, "shim"), shim); err == nil {
+	if _, err := gitgen.FindGH(filepath.Join(dir, "shim"), shim); err == nil {
 		t.Fatal("want an error when only the shim is in PATH")
 	}
 }

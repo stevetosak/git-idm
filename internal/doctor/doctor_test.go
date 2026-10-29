@@ -228,3 +228,31 @@ func TestDoctorFindsLocalKeysUnderRules(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorChecksGHShim(t *testing.T) {
+	home, c, a := setup(t)
+	a.BinDir = filepath.Join(home, ".local", "bin")
+	os.MkdirAll(a.BinDir, 0o755)
+	other := filepath.Join(home, "brew", "gh")
+	os.MkdirAll(filepath.Dir(other), 0o755)
+	os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755)
+	lookPath := func(first string) func(string) (string, error) {
+		return func(string) (string, error) { return first, nil }
+	}
+	check := func(first, substr string, level Level) {
+		t.Helper()
+		ch := find(Run(c, a, resolve.Result{Identity: "work"}, Env{Getenv: func(string) string { return "" }, LookPath: lookPath(first)}), substr)
+		if ch == nil || ch.Level != level {
+			t.Errorf("%q: got %+v, want level %d", substr, ch, level)
+		}
+	}
+
+	check(other, "gh shim is missing", Warn)
+	os.WriteFile(a.ShimPath(), []byte(gitgen.RenderShim(a.Bin)), 0o755)
+	check(a.ShimPath(), "gh follows the folder in all programs (~/.local/bin/gh)", OK)
+	check(other, "gh in PATH is ~/brew/gh, not the git-idm shim", Warn)
+	os.WriteFile(a.ShimPath(), []byte(gitgen.RenderShim("/old/git-idm")), 0o755)
+	check(a.ShimPath(), "gh shim is out of date", Warn)
+	os.WriteFile(a.ShimPath(), []byte("#!/bin/sh\n"), 0o755)
+	check(a.ShimPath(), "~/.local/bin/gh is not made by git-idm", Info)
+}
