@@ -26,7 +26,7 @@ var (
 )
 
 var quietCommands = map[string]bool{
-	"check-commit": true, "credential-hint": true, "env": true, "prompt": true, "hook": true, "update": true, "update-check": true,
+	"check-commit": true, "credential-hint": true, "env": true, "gh": true, "prompt": true, "hook": true, "update": true, "update-check": true,
 	"completion": true, cobra.ShellCompRequestCmd: true, cobra.ShellCompNoDescRequestCmd: true,
 }
 
