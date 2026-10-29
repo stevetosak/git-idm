@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/stevetosak/git-idm/internal/config"
@@ -26,7 +27,7 @@ func LocalLegacy(c *config.Config, repos []localid.Repo) []Legacy {
 		if email != "" && strings.EqualFold(repo.Allowed, email) {
 			continue
 		}
-		rule := coveringRule(c.Rules, repo.Root)
+		rule := coveringRule(c.Rules, gitDataDir(repo))
 		if rule == nil {
 			continue
 		}
@@ -65,6 +66,10 @@ func LocalLegacy(c *config.Config, repos []localid.Repo) []Legacy {
 		})
 	}
 	return out
+}
+
+func gitDataDir(repo localid.Repo) string {
+	return filepath.Dir(repo.Config)
 }
 
 func coveringRule(rules []config.Rule, dir string) *config.Rule {

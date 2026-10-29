@@ -22,7 +22,7 @@ func TestArgumentErrorsExplainUsage(t *testing.T) {
 		not  []string
 	}{
 		{[]string{"edit"}, []string{"edit needs <identity>", "usage:       git-idm edit <identity> [flags]", "example:     git-idm edit client", "identities:  client, work", "help:        git-idm edit --help"}, nil},
-		{[]string{"bind"}, []string{"bind needs <identity>", "usage:       git-idm bind <identity> [dir] [flags]"}, nil},
+		{[]string{"bind", "a", "b", "c"}, []string{"bind got too many arguments: c", "usage:       git-idm bind [identity] [dir] [flags]"}, nil},
 		{[]string{"rm", "a", "b"}, []string{"rm got too many arguments: b"}, nil},
 		{[]string{"ls", "x"}, []string{"ls takes no arguments, got: x", "help:        git-idm ls --help"}, []string{"identities"}},
 		{[]string{"hook"}, []string{"hook needs <zsh|bash|fish>"}, []string{"identities"}},

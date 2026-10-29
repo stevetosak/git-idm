@@ -69,7 +69,7 @@ func TestImportRepos(t *testing.T) {
 	for _, r := range c.Rules {
 		rules = append(rules, r.Path+"="+r.Identity)
 	}
-	if got := strings.Join(rules, " "); got != "~/Personal/=personal ~/Projects/codechem/=codechem ~/Projects/mix/sub/=other" {
+	if got := strings.Join(rules, " "); got != "~/Personal/=personal ~/Projects/codechem/=codechem ~/Projects/mix/sub/=other ~/oss/tool/=work" {
 		t.Errorf("rules = %s", got)
 	}
 	if !strings.Contains(strings.Join(res.Skipped, "\n"), "~/Projects/mix sets martin@codechem.com, but other authors") {

@@ -22,6 +22,7 @@ func TestSegment(t *testing.T) {
 		{resolve.Result{Identity: "work", Source: resolve.SourceOverride, Rule: &temp}, "%B%F{red}work (override)%f%b"},
 		{resolve.Result{Identity: "client", Source: resolve.SourceRule, Rule: &temp, LocalEmail: "o@x.example"}, "%B%F{yellow}client (temp) (repo user)%f%b"},
 		{resolve.Result{}, ""},
+		{resolve.Result{Source: resolve.SourceNone, Suggested: "work"}, "%B%F{red}no identity%f%b"},
 	}
 	for _, tc := range cases {
 		if got := Segment(Zsh, c, tc.res); got != tc.want {

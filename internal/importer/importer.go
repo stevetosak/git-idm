@@ -82,8 +82,9 @@ func (r *Result) importDefault(global gitConfig, name string) error {
 		return nil
 	}
 	id := identityFrom(global, global)
-	id.GHConfigDir = DefaultGHConfigDir()
-	id.GHUser = GHUserFromConfigDir(id.GHConfigDir)
+	if user := GHUserFromConfigDir(DefaultGHConfigDir()); user != "" {
+		id.GHConfigDir, id.GHUser = DefaultGHConfigDir(), user
+	}
 	r.Config.Identities[name] = id
 	r.Config.Default = name
 	r.Findings = append(r.Findings, describe(name, id, "~/.gitconfig", sshSource(global), "default gh config"))

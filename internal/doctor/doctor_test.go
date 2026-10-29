@@ -41,7 +41,7 @@ func find(checks []Check, substr string) *Check {
 
 func run(c *config.Config, a *gitgen.Applier, env map[string]string) []Check {
 	_, hook := env["_GIT_IDM_SEGMENT"]
-	return Run(c, a, resolve.Result{Identity: c.Default, Source: resolve.SourceDefault},
+	return Run(c, a, resolve.Result{Identity: c.Default, Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/", Identity: c.Default}},
 		Env{Getenv: func(k string) string { return env[k] }, HookHint: "hint", ShellHook: hook})
 }
 
@@ -158,7 +158,7 @@ func TestDoctorChecksTokens(t *testing.T) {
 		}
 		return ghauth.Account{Login: "w-gh", Scopes: []string{"admin:public_key"}}, nil
 	}
-	checks := Run(c, a, resolve.Result{Identity: "work", Source: resolve.SourceDefault},
+	checks := Run(c, a, resolve.Result{Identity: "work", Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/", Identity: "work"}},
 		Env{Getenv: func(string) string { return "" }, GHAccount: fetch})
 
 	want := []struct {
@@ -222,9 +222,54 @@ func TestDoctorFindsLocalKeysUnderRules(t *testing.T) {
 	if ch := find(checks, "~/Projects/named: .git/config sets user.name over the work rule"); ch == nil || ch.Fix != "git-idm migrate" {
 		t.Errorf("named: got %+v", ch)
 	}
-	for _, substr := range []string{"~/Projects/allowed", "~/outside", "sets author"} {
+	if ch := find(checks, "1 repo(s) have no identity, they use your own git config: ~/outside/"); ch == nil || ch.Level != Info {
+		t.Errorf("unbound repo: got %+v", ch)
+	}
+	for _, substr := range []string{"~/Projects/allowed", "~/outside:", "sets author"} {
 		if ch := find(checks, substr); ch != nil {
 			t.Errorf("%q must not be reported: %+v", substr, ch)
 		}
+	}
+}
+
+func TestDoctorChecksGHShim(t *testing.T) {
+	home, c, a := setup(t)
+	a.BinDir = filepath.Join(home, ".local", "bin")
+	os.MkdirAll(a.BinDir, 0o755)
+	other := filepath.Join(home, "brew", "gh")
+	os.MkdirAll(filepath.Dir(other), 0o755)
+	os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755)
+	lookPath := func(first string) func(string) (string, error) {
+		return func(string) (string, error) { return first, nil }
+	}
+	check := func(first, substr string, level Level) {
+		t.Helper()
+		ch := find(Run(c, a, resolve.Result{Identity: "work"}, Env{Getenv: func(string) string { return "" }, LookPath: lookPath(first)}), substr)
+		if ch == nil || ch.Level != level {
+			t.Errorf("%q: got %+v, want level %d", substr, ch, level)
+		}
+	}
+
+	check(other, "gh shim is missing", Warn)
+	os.WriteFile(a.ShimPath(), []byte(gitgen.RenderShim(a.Bin)), 0o755)
+	check(a.ShimPath(), "gh follows the folder in all programs (~/.local/bin/gh)", OK)
+	check(other, "gh in PATH is ~/brew/gh, not the git-idm shim", Warn)
+	os.WriteFile(a.ShimPath(), []byte(gitgen.RenderShim("/old/git-idm")), 0o755)
+	check(a.ShimPath(), "gh shim is out of date", Warn)
+	os.WriteFile(a.ShimPath(), []byte("#!/bin/sh\n"), 0o755)
+	check(a.ShimPath(), "~/.local/bin/gh is not made by git-idm", Info)
+}
+
+func TestDoctorWarnsAboutDefaultGHLogin(t *testing.T) {
+	home, c, a := setup(t)
+	os.MkdirAll(filepath.Join(home, ".config", "gh"), 0o700)
+	os.WriteFile(filepath.Join(home, ".config", "gh", "hosts.yml"), []byte("github.com:\n    user: mdr\n"), 0o600)
+	c.Identities["old"] = config.Identity{Name: "O", Email: "o@x.example", GHConfigDir: "~/.config/gh", GHUser: "mdr"}
+	checks := run(c, a, nil)
+	if ch := find(checks, "the default gh folder ~/.config/gh is logged in as mdr"); ch == nil || ch.Level != Warn || ch.Fix != "git-idm migrate" {
+		t.Errorf("default login: got %+v", ch)
+	}
+	if ch := find(checks, "old uses the default gh folder"); ch == nil || ch.Level != Warn {
+		t.Errorf("identity on the default folder: got %+v", ch)
 	}
 }

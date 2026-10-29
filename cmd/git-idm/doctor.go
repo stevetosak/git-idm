@@ -27,8 +27,8 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 			_, hook := os.LookupEnv(shell.SegmentVar)
-			env := doctor.Env{Getenv: os.Getenv, HookHint: hookHint(), ShellHook: hook}
-			if gh, err := exec.LookPath("gh"); err == nil {
+			env := doctor.Env{Getenv: os.Getenv, HookHint: hookHint(), ShellHook: hook, LookPath: exec.LookPath}
+			if gh := gitgen.RealGH(); gh != "" {
 				env.GHAccount = func(dir string) (ghauth.Account, error) { return ghauth.Fetch(gh, dir) }
 			}
 			checks := doctor.Run(c, a, res, env)

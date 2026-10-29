@@ -37,6 +37,7 @@ type Env struct {
 	HookHint  string
 	ShellHook bool
 	GHAccount func(dir string) (ghauth.Account, error)
+	LookPath  func(string) (string, error)
 }
 
 type tokenResult struct {
@@ -65,7 +66,7 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 
 	tokens := checkTokens(c, env.GHAccount)
 	for _, name := range c.Names() {
-		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens)...)
+		checks = append(checks, identityChecks(a, name, c.Identities[name], tokens, gitgen.UsesGH(c))...)
 	}
 
 	for _, r := range c.Rules {
@@ -80,6 +81,8 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	}
 
 	checks = append(checks, guardChecks(c, a, string(global))...)
+
+	checks = append(checks, shimChecks(c, a, env.LookPath)...)
 
 	if env.ShellHook {
 		add(OK, "", "shell hook is active")
@@ -96,6 +99,8 @@ func Run(c *config.Config, a *gitgen.Applier, res resolve.Result, env Env) []Che
 	}
 	local := localChecks(c)
 	checks = append(checks, local...)
+	checks = append(checks, unboundChecks(c)...)
+	checks = append(checks, defaultGHChecks(c)...)
 	if res.RepoRoot != "" {
 		checks = append(checks, repoChecks(c, res, local)...)
 	}
@@ -121,6 +126,50 @@ func localChecks(c *config.Config) []Check {
 	return checks
 }
 
+func defaultGHChecks(c *config.Config) []Check {
+	if !gitgen.UsesGH(c) {
+		return nil
+	}
+	def := importer.DefaultGHConfigDir()
+	var checks []Check
+	if user := importer.GHUserFromConfigDir(def); user != "" {
+		checks = append(checks, Check{Level: Warn, Text: fmt.Sprintf("the default gh folder %s is logged in as %s: a gh that skips git-idm acts as %s", def, user, user), Fix: "git-idm migrate"})
+	}
+	for _, name := range c.Names() {
+		if importer.IsDefaultGHDir(c.Identities[name].GHConfigDir) {
+			checks = append(checks, Check{Level: Warn, Text: name + " uses the default gh folder " + def + ", which any gh can use", Fix: "git-idm migrate"})
+		}
+	}
+	return checks
+}
+
+func unboundChecks(c *config.Config) []Check {
+	if len(c.Identities) == 0 {
+		return nil
+	}
+	groups := importer.UnboundGroups(c, importer.ScanHome().Repos)
+	if len(groups) == 0 {
+		return nil
+	}
+	repos := 0
+	var paths []string
+	for _, g := range groups {
+		repos += len(g.Repos)
+		if len(paths) < 5 {
+			paths = append(paths, g.RulePath())
+		}
+	}
+	if len(groups) > len(paths) {
+		paths = append(paths, fmt.Sprintf("+%d more", len(groups)-len(paths)))
+	}
+	level, effect := Info, "they use your own git config"
+	if c.GuardEnabled() {
+		level, effect = Warn, "git refuses to commit there"
+	}
+	return []Check{{Level: level, Text: fmt.Sprintf("%d repo(s) have no identity, %s: %s", repos, effect, strings.Join(paths, ", ")),
+		Fix: "git-idm migrate (binds them), or git-idm bind in each repo"}}
+}
+
 func ruleIdentity(c *config.Config, path string) string {
 	for _, r := range c.Rules {
 		if r.Path == path {
@@ -130,12 +179,13 @@ func ruleIdentity(c *config.Config, path string) string {
 	return ""
 }
 
-func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult) []Check {
+func identityChecks(a *gitgen.Applier, name string, id config.Identity, tokens map[string]tokenResult, strict bool) []Check {
 	var checks []Check
 	add := func(level Level, fix, format string, args ...any) {
 		checks = append(checks, Check{Level: level, Text: name + ": " + fmt.Sprintf(format, args...), Fix: fix})
 	}
-	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(name, id, a.Bin) {
+	protocol, protoErr := os.ReadFile(a.ProtocolFile(name))
+	if data, err := os.ReadFile(a.IdentityFile(name)); err != nil || string(data) != gitgen.RenderIdentity(name, id, a.Bin, strict) || protoErr != nil || string(protocol) != gitgen.RenderProtocol(id) {
 		add(Warn, "git-idm apply", "generated git config is missing or out of date")
 	}
 	if id.SSHKey != "" {
@@ -202,6 +252,33 @@ func checkTokens(c *config.Config, fetch func(string) (ghauth.Account, error)) m
 	}
 	wg.Wait()
 	return results
+}
+
+func shimChecks(c *config.Config, a *gitgen.Applier, lookPath func(string) (string, error)) []Check {
+	shim := a.ShimPath()
+	if shim == "" || lookPath == nil || !gitgen.UsesGH(c) {
+		return nil
+	}
+	path := config.ContractHome(shim)
+	found, err := lookPath("gh")
+	if err != nil {
+		return nil
+	}
+	_, statErr := os.Lstat(shim)
+	switch {
+	case statErr != nil:
+		return []Check{{Level: Warn, Text: "gh shim is missing: gh outside the shell hook (scripts, editors, AI agents) uses the wrong login", Fix: "git-idm apply"}}
+	case !gitgen.IsShim(shim):
+		return []Check{{Level: Info, Text: path + " is not made by git-idm: gh outside the shell hook does not follow the folder"}}
+	}
+	if data, _ := os.ReadFile(shim); string(data) != gitgen.RenderShim(a.Bin) {
+		return []Check{{Level: Warn, Text: "gh shim is out of date", Fix: "git-idm apply"}}
+	}
+	if real, err := filepath.EvalSymlinks(found); err != nil || !gitgen.IsShim(real) {
+		return []Check{{Level: Warn, Text: fmt.Sprintf("gh in PATH is %s, not the git-idm shim", config.ContractHome(found)),
+			Fix: "put " + config.ContractHome(a.BinDir) + " first in PATH"}}
+	}
+	return []Check{{Level: OK, Text: "gh follows the folder in all programs (" + path + ")"}}
 }
 
 func guardChecks(c *config.Config, a *gitgen.Applier, global string) []Check {

@@ -21,6 +21,7 @@ type Applier struct {
 	ConfigDir    string
 	GlobalConfig string
 	Bin          string
+	BinDir       string
 	Now          func() time.Time
 	backupDir    string
 	backedUp     map[string]string
@@ -39,7 +40,7 @@ func NewApplier() (*Applier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, Now: time.Now}, nil
+	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, BinDir: DefaultBinDir(), Now: time.Now}, nil
 }
 
 func Executable() (string, error) {
@@ -72,16 +73,29 @@ func (a *Applier) IdentityFile(name string) string {
 	return filepath.Join(a.GeneratedDir(), name+".gitconfig")
 }
 
+func (a *Applier) ProtocolDir() string {
+	return filepath.Join(a.GeneratedDir(), "protocol")
+}
+
+func (a *Applier) ProtocolFile(name string) string {
+	return filepath.Join(a.ProtocolDir(), name+".gitconfig")
+}
+
 func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	var changes []Change
-	if err := os.MkdirAll(a.GeneratedDir(), 0o700); err != nil {
+	if err := os.MkdirAll(a.ProtocolDir(), 0o700); err != nil {
 		return nil, err
 	}
 	for _, name := range c.Names() {
-		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(name, c.Identities[name], a.Bin), false)
+		ch, err := a.writeIfChanged(a.IdentityFile(name), RenderIdentity(name, c.Identities[name], a.Bin, UsesGH(c)), false)
+		if err != nil {
+			return changes, err
+		}
+		changes = append(changes, ch...)
+		ch, err = a.writeIfChanged(a.ProtocolFile(name), RenderProtocol(c.Identities[name]), false)
 		if err != nil {
 			return changes, err
 		}
@@ -94,6 +108,11 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	}
 	hooks, err := a.syncHooks(c.GuardEnabled())
 	changes = append(changes, hooks...)
+	if err != nil {
+		return changes, err
+	}
+	shim, err := a.syncShim(c)
+	changes = append(changes, shim...)
 	if err != nil {
 		return changes, err
 	}
@@ -115,7 +134,10 @@ func (a *Applier) Block(c *config.Config) string {
 	if c.GuardEnabled() {
 		hooksDir = config.ContractHome(a.HooksDir())
 	}
-	return RenderBlock(c, func(name string) string { return config.ContractHome(a.IdentityFile(name)) }, hooksDir)
+	return RenderBlock(c,
+		func(name string) string { return config.ContractHome(a.IdentityFile(name)) },
+		func(name string) string { return config.ContractHome(a.ProtocolFile(name)) },
+		hooksDir, a.Bin)
 }
 
 func (a *Applier) Installed() bool {
@@ -190,20 +212,32 @@ func (a *Applier) writeIfChanged(path, content string, backup bool) ([]Change, e
 }
 
 func (a *Applier) removeStale(c *config.Config) ([]Change, error) {
-	entries, err := os.ReadDir(a.GeneratedDir())
+	var changes []Change
+	for _, dir := range []string{a.GeneratedDir(), a.ProtocolDir()} {
+		ch, err := removeStaleIn(dir, c)
+		changes = append(changes, ch...)
+		if err != nil {
+			return changes, err
+		}
+	}
+	return changes, nil
+}
+
+func removeStaleIn(dir string, c *config.Config) ([]Change, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	var changes []Change
 	for _, e := range entries {
 		name, ok := strings.CutSuffix(e.Name(), ".gitconfig")
-		if !ok {
+		if !ok || e.IsDir() {
 			continue
 		}
 		if _, keep := c.Identities[name]; keep {
 			continue
 		}
-		path := filepath.Join(a.GeneratedDir(), e.Name())
+		path := filepath.Join(dir, e.Name())
 		if err := os.Remove(path); err != nil {
 			return changes, err
 		}

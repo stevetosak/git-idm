@@ -51,17 +51,38 @@ func TestRenderIdentityQuoting(t *testing.T) {
 	out := RenderIdentity("jo", config.Identity{
 		Name: `Jo "JJ" \ Doe ; # x`, Email: "jo@x.example",
 		SSHKey: "~/.ssh/it's key", Protocol: config.ProtocolSSH, GHConfigDir: "~/.config/gh-p",
-	}, "/opt/my bin/git-idm")
+	}, "/opt/my bin/git-idm", false)
 	for _, want := range []string{
 		`name = "Jo \"JJ\" \\ Doe ; # x"`,
 		`sshCommand = "ssh -i '/h/u/.ssh/it'\\''s key' -o IdentitiesOnly=yes"`,
-		"[url \"git@github.com:\"]\n\tinsteadOf = \"https://github.com/\"",
-		"[credential \"https://github.com\"]\n\thelper = \"\"\n\thelper = \"!GH_CONFIG_DIR='/h/u/.config/gh-p' ",
-		"\thelper = \"!test -x '/opt/my bin/git-idm' || exit 0; '/opt/my bin/git-idm' credential-hint 'jo'\"",
+		"[credential \"https://github.com\"]\n\thelper = \"\"\n\thelper = " + gitQuote(CredentialHelper("/opt/my bin/git-idm", "jo")) + "\n",
+		`exec '/opt/my bin/git-idm' credential 'jo' \"$@\"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s\nin:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "insteadOf") {
+		t.Errorf("the protocol has its own file:\n%s", out)
+	}
+	if got := RenderProtocol(config.Identity{Protocol: config.ProtocolSSH}); !strings.Contains(got, "[url \"git@github.com:\"]\n\tinsteadOf = \"https://github.com/\"") {
+		t.Errorf("ssh protocol:\n%s", got)
+	}
+	if got := RenderProtocol(config.Identity{}); !strings.Contains(got, "[url \"https://github.com/\"]\n\tinsteadOf = \"https://github.com/\"") {
+		t.Errorf("https protocol keeps https, also under an ssh parent:\n%s", got)
+	}
+	if strings.Contains(out, "GH_CONFIG_DIR") || strings.Count(out, "helper =") != 2 {
+		t.Errorf("only the reset and the git-idm helper are allowed:\n%s", out)
+	}
+}
+
+func TestRenderIdentityStrictCredential(t *testing.T) {
+	plain := config.Identity{Name: "P", Email: "p@x.example"}
+	if out := RenderIdentity("plain", plain, "/bin/git-idm", false); strings.Contains(out, "credential") {
+		t.Errorf("no gh in the config: no helper expected:\n%s", out)
+	}
+	if out := RenderIdentity("plain", plain, "/bin/git-idm", true); !strings.Contains(out, "credential 'plain'") {
+		t.Errorf("gh in the config: every identity needs the helper:\n%s", out)
 	}
 }
 
@@ -69,12 +90,16 @@ func TestRenderBlockOrdersDeeperRulesLast(t *testing.T) {
 	c := config.New()
 	c.Default = "a"
 	c.Rules = []config.Rule{{Path: "~/x/y/", Identity: "b"}, {Path: "~/x/", Identity: "a"}}
-	out := RenderBlock(c, func(n string) string { return n }, "")
-	if strings.Index(out, "~/x/y/") < strings.Index(out, "~/x/\"") {
-		t.Fatalf("deeper rule must come last:\n%s", out)
+	out := RenderBlock(c, func(n string) string { return n }, func(n string) string { return "proto-" + n }, "", "")
+	order := func(a, b string) bool { return strings.Index(out, a) < strings.Index(out, b) }
+	if !order("path = \"proto-b\"", "path = \"proto-a\"") {
+		t.Fatalf("protocol: the deeper rule must come first, because git keeps the first equal insteadOf:\n%s", out)
 	}
-	if !strings.HasPrefix(out, BlockStart+"\n[include]\n\tpath = \"a\"\n") {
-		t.Fatalf("default include must come first:\n%s", out)
+	if !order("path = \"proto-a\"", "path = \"a\"") || !order("path = \"a\"", "path = \"b\"") {
+		t.Fatalf("identities: protocol files first, then the deeper rule last:\n%s", out)
+	}
+	if strings.Contains(out, "[include]") {
+		t.Fatalf("the default identity must never be included for every folder:\n%s", out)
 	}
 }
 

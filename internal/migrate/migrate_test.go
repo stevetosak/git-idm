@@ -144,7 +144,7 @@ func TestApplyThenMigrateKeepsAuthors(t *testing.T) {
 	if len(backups) < 2 {
 		t.Fatalf("want backups of gitconfig and identity file, got %v", backups)
 	}
-	if got := run(t, personalRepo, "config", "core.sshCommand"); got != "ssh -i '"+home+"/.ssh/id_personal' -o IdentitiesOnly=yes" {
+	if got := run(t, personalRepo, "config", "core.sshCommand"); !strings.Contains(got, " ssh 'personal' ") || !strings.Contains(got, "ssh -i '"+home+"/.ssh/id_personal' -o IdentitiesOnly=yes") {
 		t.Fatalf("sshCommand = %q", got)
 	}
 	if got := run(t, personalRepo, "config", "--get-regexp", `^url\..*insteadof$`); !strings.Contains(got, "https://github.com/") {

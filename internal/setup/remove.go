@@ -135,7 +135,8 @@ func (r *Remover) ownLogin(name string) bool {
 		return false
 	}
 	for _, other := range r.Config.Names() {
-		if other != name && r.Config.Identities[other].GHConfigDir == id.GHConfigDir {
+		o := r.Config.Identities[other]
+		if other != name && (o.GHConfigDir == id.GHConfigDir || (id.GHUser != "" && strings.EqualFold(o.GHUser, id.GHUser))) {
 			return false
 		}
 	}

@@ -109,7 +109,7 @@ func TestMismatchHintForLocalAuthor(t *testing.T) {
 	}
 
 	out.Reset()
-	printMismatch(&out, c, resolve.Result{Identity: "work", Source: resolve.SourceDefault, LocalEmail: "martin@old.example"}, v)
+	printMismatch(&out, c, resolve.Result{Identity: "work", Source: resolve.SourceOverride, LocalEmail: "martin@old.example"}, v)
 	if !strings.Contains(out.String(), "git config --local --unset-all user.email") || strings.Contains(out.String(), "migrate") {
 		t.Errorf("without a rule:\n%s", out.String())
 	}

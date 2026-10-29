@@ -50,7 +50,7 @@ func newRootCmd() *cobra.Command {
 		newUseCmd(), newBindCmd(), newUnbindCmd(),
 		newDoctorCmd(), newLoginCmd(), newGuardCmd(), newAllowCmd(),
 		newInitCmd(), newMigrateCmd(), newExportCmd(), newImportCmd(), newApplyCmd(), newHookCmd(), newPromptCmd(),
-		newVersionCmd(), newUpdateCmd(), newUpdateCheckCmd(), newEnvCmd(), newCheckCommitCmd(), newCredentialHintCmd(),
+		newVersionCmd(), newUpdateCmd(), newUpdateCheckCmd(), newEnvCmd(), newCheckCommitCmd(), newCheckPushCmd(), newCredentialHintCmd(), newCredentialCmd(), newGHCmd(), newSSHCmd(),
 	)
 	root.SuggestionsMinimumDistance = 2
 	root.Version = version.Current()

@@ -107,6 +107,8 @@ func sandbox(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	os.Unsetenv("XDG_CONFIG_HOME")
 	return home
 }
 

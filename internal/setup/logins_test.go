@@ -97,13 +97,23 @@ func TestExecutorKeepsExistingLoginConfig(t *testing.T) {
 	home := sandbox(t)
 	tools, log := fakeTools(t, home)
 	ex := &Executor{Tools: tools, ConfigDir: filepath.Join(home, ".config", "git-idm"), Out: &bytes.Buffer{}}
+	defaultHosts := filepath.Join(home, ".config", "gh", "hosts.yml")
+	os.MkdirAll(filepath.Dir(defaultHosts), 0o700)
+	os.WriteFile(defaultHosts, []byte("github.com:\n    user: u\n"), 0o600)
 	p := Plan{Name: "e", AuthorName: "J", Email: "j@e.example", GHUser: "u", GHConfigDir: "~/.config/gh", SSH: SSHGenerate, SSHKey: "~/.ssh/git-idm_e"}
 	id, _, err := ex.Run(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id.GHConfigDir != "~/.config/gh" || id.GHUser != "u" {
-		t.Fatalf("identity = %+v", id)
+	if id.GHConfigDir != "~/.config/git-idm/gh/e" || id.GHUser != "u" {
+		t.Fatalf("an identity must never use the default gh folder: %+v", id)
+	}
+	copied := filepath.Join(home, ".config", "git-idm", "gh", "e", "hosts.yml")
+	if info, err := os.Stat(copied); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("copied login: %v %v", err, info)
+	}
+	if data, _ := os.ReadFile(defaultHosts); string(data) != "github.com:\n    user: u\n" {
+		t.Fatalf("the default login must stay as it is: %q", data)
 	}
 	if calls, _ := os.ReadFile(log); len(calls) != 0 {
 		t.Fatalf("must not change an existing gh login:\n%s", calls)

@@ -48,6 +48,9 @@ func newInitCmd() *cobra.Command {
 			if err := printImport(out, res); err != nil {
 				return err
 			}
+			if err := bindUnbound(cmd, out, res.Config, importer.UnboundGroups(res.Config, res.Repos), true); err != nil {
+				return err
+			}
 			path, err := config.Path()
 			if err != nil {
 				return err
@@ -160,6 +163,12 @@ func runInitReview(cmd *cobra.Command, prompter setup.Prompter, opts importer.Op
 		}
 	}
 	if err := offerMigrate(out, prompter, c, mergeLegacy(res.Legacy, importer.EnvrcLegacy(c.Rules), importer.LocalLegacy(c, res.Repos))); err != nil {
+		return err
+	}
+	if err := isolateDefaultGH(cmd, out, c, false); err != nil {
+		return err
+	}
+	if err := bindUnbound(cmd, out, c, importer.UnboundGroups(c, res.Repos), false); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "\nDone. Check any time with: git-idm")

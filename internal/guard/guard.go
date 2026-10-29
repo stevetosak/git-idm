@@ -16,11 +16,16 @@ type Verdict struct {
 	Expected     string
 	ExpectedFrom string
 	Actual       string
-	Allowed      bool
+	Committer    string
+	AllowedEmail string
+}
+
+func (v Verdict) Accepts(email string) bool {
+	return v.Expected == "" || strings.EqualFold(v.Expected, email) || (v.AllowedEmail != "" && strings.EqualFold(v.AllowedEmail, email))
 }
 
 func (v Verdict) OK() bool {
-	return v.Expected == "" || strings.EqualFold(v.Expected, v.Actual) || v.Allowed
+	return v.Accepts(v.Actual) && (v.Committer == "" || v.Accepts(v.Committer))
 }
 
 func Check(c *config.Config, res resolve.Result, dir string) (Verdict, error) {
@@ -36,9 +41,12 @@ func Check(c *config.Config, res resolve.Result, dir string) (Verdict, error) {
 		return v, err
 	}
 	v.Actual = EmailFromIdent(ident)
-	if allowed, _ := git(dir, "config", "--local", "--get", AllowKey); allowed != "" {
-		v.Allowed = strings.EqualFold(allowed, v.Actual)
+	committer, err := git(dir, "var", "GIT_COMMITTER_IDENT")
+	if err != nil {
+		return v, err
 	}
+	v.Committer = EmailFromIdent(committer)
+	v.AllowedEmail, _ = git(dir, "config", "--local", "--get", AllowKey)
 	return v, nil
 }
 

@@ -59,7 +59,7 @@ func Use(sh Shell, c *config.Config, name string, res resolve.Result) (string, e
 	var b strings.Builder
 	b.WriteString(clearOverride(sh))
 	bin, _ := gitgen.Executable()
-	entries := gitgen.IdentityEntries(name, id, bin)
+	entries := append(gitgen.IdentityEntries(name, id, bin, gitgen.UsesGH(c)), gitgen.ProtocolEntries(id)...)
 	for i, e := range entries {
 		export(sh, &b, fmt.Sprintf("GIT_CONFIG_KEY_%d", i), e.Name())
 		export(sh, &b, fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), e.Value)
@@ -89,6 +89,9 @@ func clearOverride(sh Shell) string {
 
 func Segment(sh Shell, c *config.Config, res resolve.Result) string {
 	if res.Identity == "" {
+		if res.Source == resolve.SourceNone && len(c.Identities) > 0 {
+			return paint(sh, "no identity", "red", true)
+		}
 		return ""
 	}
 	color := c.Identities[res.Identity].Color
