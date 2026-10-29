@@ -40,8 +40,14 @@ func IdentityEntries(name string, id config.Identity, bin string, strict bool) [
 			Entry{Section: "gpg", Key: "format", Value: signingFormat(id.SigningKey)},
 		)
 	}
-	if cmd := SSHCommand(id); cmd != "" {
-		entries = append(entries, Entry{Section: "core", Key: "sshCommand", Value: cmd})
+	switch {
+	case bin != "" && strict:
+		entries = append(entries,
+			Entry{Section: "core", Key: "sshCommand", Value: SSHWrapper(bin, name, id)},
+			Entry{Section: "ssh", Key: "variant", Value: "ssh"},
+		)
+	case SSHCommand(id) != "":
+		entries = append(entries, Entry{Section: "core", Key: "sshCommand", Value: SSHCommand(id)})
 	}
 	if id.Protocol == config.ProtocolSSH {
 		entries = append(entries, Entry{Section: "url", Subsection: "git@github.com:", Key: "insteadOf", Value: "https://github.com/"})
@@ -74,6 +80,17 @@ func SSHCommand(id config.Identity) string {
 		return ""
 	}
 	return "ssh -i " + ShellQuote(config.ExpandHome(id.SSHKey)) + " -o IdentitiesOnly=yes"
+}
+
+func SSHWrapper(bin, name string, id config.Identity) string {
+	q := ShellQuote(bin)
+	fallback := "ssh"
+	if id.SSHKey != "" {
+		fallback = SSHCommand(id)
+	}
+	return `f() { if [ -x ` + q + ` ]; then exec ` + q + ` ssh ` + ShellQuote(name) + ` "$@"; fi; ` +
+		`case "$*" in *git-receive-pack*) echo "git-idm: "` + q + `" not found, the push stops (run: git-idm doctor)" >&2; exit 1;; esac; ` +
+		`exec ` + fallback + ` "$@"; }; f`
 }
 
 func RenderIdentity(name string, id config.Identity, bin string, strict bool) string {

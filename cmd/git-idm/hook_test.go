@@ -16,7 +16,7 @@ func TestZshHook(t *testing.T) {
 	home, bin := hookHome(t)
 	script := bin + ` apply >/dev/null
 eval "$(` + bin + ` hook zsh)"
-p() { print -r -- "$1|${GH_CONFIG_DIR:-unset}|${_GIT_IDM_SEGMENT}|$(git var GIT_AUTHOR_IDENT | cut -d'>' -f1)>|$(git config core.sshCommand)" }
+p() { print -r -- "$1|${GH_CONFIG_DIR:-unset}|${_GIT_IDM_SEGMENT}|$(git var GIT_AUTHOR_IDENT | cut -d'>' -f1)>|$(git config core.sshCommand | grep -o "ssh '[a-z]*'")" }
 cd ~/P/repo && git init -q && p rule
 cd ~/W/repo && git init -q && p default
 git-idm use personal 2>/dev/null; p override
@@ -31,10 +31,10 @@ print -r -- "rprompt=$RPROMPT"
 	if err != nil {
 		t.Fatalf("zsh: %v\n%s", err, out)
 	}
-	sshP := "ssh -i '" + home + "/.ssh/id_p' -o IdentitiesOnly=yes"
+	sshP := "ssh 'personal'"
 	checkLines(t, string(out), []string{
 		"rule|" + home + "/gh-personal|%F{cyan}personal%f|P <p@x.example>|" + sshP,
-		"default|" + home + "/gh-work|%F{cyan}work%f|W <w@x.example>|",
+		"default|" + home + "/gh-work|%F{cyan}work%f|W <w@x.example>|ssh 'work'",
 		"override|" + home + "/gh-personal|%B%F{red}personal (override)%f%b|P <p@x.example>|" + sshP,
 		"override-moved|" + home + "/gh-personal|%B%F{red}personal (override)%f%b|P <p@x.example>|" + sshP,
 		"cleared|" + home + "/gh-personal|%F{cyan}personal%f|P <p@x.example>|" + sshP,
@@ -62,7 +62,7 @@ PROMPT_COMMAND='echo -n'
 eval "$(` + bin + ` hook bash)"
 eval "$(` + bin + ` hook bash)"
 prompt() { eval "$PROMPT_COMMAND"; }
-p() { printf '%s|%s|%s|%s>|%s\n' "$1" "${GH_CONFIG_DIR:-unset}" "${_GIT_IDM_SEGMENT}" "$(git var GIT_AUTHOR_IDENT | cut -d'>' -f1)" "$(git config core.sshCommand)"; }
+p() { printf '%s|%s|%s|%s>|%s\n' "$1" "${GH_CONFIG_DIR:-unset}" "${_GIT_IDM_SEGMENT}" "$(git var GIT_AUTHOR_IDENT | cut -d'>' -f1)" "$(git config core.sshCommand | grep -o "ssh '[a-z]*'")"; }
 cd ~/P/repo && git init -q && prompt && p rule
 cd ~/W/repo && git init -q && prompt && p default
 git-idm use personal 2>/dev/null; p override
@@ -72,11 +72,11 @@ git-idm use ghost 2>&1 | head -1
 printf 'ps1=%s\n' "$PS1"
 printf 'prompt_command=%s\n' "$PROMPT_COMMAND"
 `
-	sshP := "ssh -i '" + home + "/.ssh/id_p' -o IdentitiesOnly=yes"
+	sshP := "ssh 'personal'"
 	seg := func(code, label string) string { return "\x01\x1b[" + code + "m\x02" + label + "\x01\x1b[0m\x02" }
 	want := []string{
 		"rule|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
-		"default|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|",
+		"default|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|ssh 'work'",
 		"override|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
 		"override-moved|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
 		"cleared|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
@@ -113,7 +113,7 @@ function p
     set -l gh unset
     set -q GH_CONFIG_DIR; and set gh $GH_CONFIG_DIR
     set -l author (git var GIT_AUTHOR_IDENT | cut -d'>' -f1)
-    set -l ssh (git config core.sshCommand)
+    set -l ssh (git config core.sshCommand | grep -o "ssh '[a-z]*'")
     printf '%s|%s|%s|%s>|%s\n' $argv[1] "$gh" "$_GIT_IDM_SEGMENT" "$author" "$ssh"
 end
 cd ~/P/repo; and git init -q; and p rule
@@ -130,11 +130,11 @@ printf 'rprompt=%s\n' (fish_right_prompt)
 	if err != nil {
 		t.Fatalf("fish: %v\n%s", err, out)
 	}
-	sshP := "ssh -i '" + home + "/.ssh/id_p' -o IdentitiesOnly=yes"
+	sshP := "ssh 'personal'"
 	seg := func(code, label string) string { return "\x1b[" + code + "m" + label + "\x1b[0m" }
 	checkLines(t, string(out), []string{
 		"rule|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
-		"default|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|",
+		"default|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|ssh 'work'",
 		"personal is active in this shell only. Clear with: git-idm use --clear",
 		"override|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
 		"override-moved|" + home + "/gh-personal|" + seg("1;31", "personal (override)") + "|P <p@x.example>|" + sshP,
