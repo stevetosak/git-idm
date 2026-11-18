@@ -83,6 +83,9 @@ guard = "block"
 	if err == nil || !strings.Contains(out, "author martin@old.example") {
 		t.Fatalf("bad author must be blocked: %v\n%s", err, out)
 	}
+	if !strings.Contains(out, "agents:    do not go around this check") {
+		t.Fatalf("the block message must tell agents to stop:\n%s", out)
+	}
 	if !strings.Contains(out, "git-idm accept") {
 		t.Fatalf("the block message must offer git-idm accept:\n%s", out)
 	}
