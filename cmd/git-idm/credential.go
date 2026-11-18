@@ -60,6 +60,7 @@ func runCredential(in io.Reader, out, errOut io.Writer, name, action string) err
 	}
 	stop := func(reason, fix string) error {
 		fmt.Fprintf(errOut, "git-idm: %s, so git stops here\n  fix: %s\n", reason, fix)
+		fmt.Fprintln(errOut, agentHint)
 		fmt.Fprintln(out, "quit=1")
 		return nil
 	}

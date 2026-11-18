@@ -41,7 +41,11 @@ func newHookCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), shell.Hook(sh, bin))
+			stamp, err := config.DefaultStampPath()
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(cmd.OutOrStdout(), shell.Hook(sh, bin, stamp))
 			return nil
 		},
 	}

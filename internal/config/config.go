@@ -128,7 +128,10 @@ func (c *Config) SaveFile(path string) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return Touch(filepath.Dir(path))
 }
 
 func (c *Config) Encode() ([]byte, error) {

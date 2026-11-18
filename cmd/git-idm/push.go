@@ -57,8 +57,9 @@ func runCheckPush(in io.Reader, w io.Writer, url string) error {
 	}
 	dir, _ := os.Getwd()
 	bin, _ := gitgen.Executable()
+	accepted, _ := guard.AcceptedCommits(dir)
 	problems, err := guard.CheckPush(guard.Push{
-		Dir: dir, URL: url, Name: res.Identity, Identity: id, Allowed: guard.Allowed(dir),
+		Dir: dir, URL: url, Name: res.Identity, Identity: id, Allowed: guard.Allowed(dir), Accepted: accepted,
 		Bin: bin, Strict: gitgen.UsesGH(c), Getenv: os.Getenv,
 	}, updates)
 	if err != nil {
@@ -67,6 +68,13 @@ func runCheckPush(in io.Reader, w io.Writer, url string) error {
 		}
 		fmt.Fprintln(w, "git-idm: push guard skipped:", err)
 		return nil
+	}
+	pending := guard.BlockedCommits(problems)
+	if c.Guard != config.GuardBlock {
+		pending = nil
+	}
+	if err := guard.SavePending(dir, pending); err != nil {
+		fmt.Fprintln(w, "git-idm: cannot save the blocked commits for git-idm accept:", err)
 	}
 	if len(problems) == 0 {
 		return nil

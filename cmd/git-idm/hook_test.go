@@ -24,6 +24,8 @@ cd ~/P/repo; p override-moved
 git-idm use --clear 2>/dev/null; p cleared
 git-idm use ghost 2>&1 | head -1
 print -r -- "rprompt=$RPROMPT"
+` + bin + ` bind work ~/P/ >/dev/null 2>&1; p stale
+_git_idm_precmd; p resynced
 `
 	cmd := exec.Command(zsh, "-f", "-c", script)
 	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GH_CONFIG_DIR=/leaked"}
@@ -40,6 +42,8 @@ print -r -- "rprompt=$RPROMPT"
 		"cleared|" + home + "/gh-personal|%F{cyan}personal%f|P <p@x.example>|" + sshP,
 		`git-idm: identity "ghost" does not exist`,
 		"rprompt=${_GIT_IDM_SEGMENT}",
+		"stale|" + home + "/gh-personal|%F{cyan}personal%f|W <w@x.example>|ssh 'work'",
+		"resynced|" + home + "/gh-work|%F{cyan}work%f|W <w@x.example>|ssh 'work'",
 	})
 }
 
@@ -55,6 +59,14 @@ func TestBashHook(t *testing.T) {
 	if len(shells) == 0 {
 		t.Skip("bash not installed")
 	}
+	for sh := range shells {
+		t.Run(sh, func(t *testing.T) {
+			runBashHook(t, sh)
+		})
+	}
+}
+
+func runBashHook(t *testing.T, sh string) {
 	home, bin := hookHome(t)
 	script := bin + ` apply >/dev/null
 PS1='\$ '
@@ -71,6 +83,8 @@ git-idm use --clear 2>/dev/null; p cleared
 git-idm use ghost 2>&1 | head -1
 printf 'ps1=%s\n' "$PS1"
 printf 'prompt_command=%s\n' "$PROMPT_COMMAND"
+` + bin + ` bind work ~/P/ >/dev/null 2>&1; p stale
+prompt; p resynced
 `
 	sshP := "ssh 'personal'"
 	seg := func(code, label string) string { return "\x01\x1b[" + code + "m\x02" + label + "\x01\x1b[0m\x02" }
@@ -83,18 +97,16 @@ printf 'prompt_command=%s\n' "$PROMPT_COMMAND"
 		`git-idm: identity "ghost" does not exist`,
 		"ps1=${_GIT_IDM_SEGMENT:+$_GIT_IDM_SEGMENT }\\$ ",
 		"prompt_command=_git_idm_prompt; echo -n",
+		"stale|" + home + "/gh-personal|" + seg("36", "personal") + "|W <w@x.example>|ssh 'work'",
+		"resynced|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|ssh 'work'",
 	}
-	for sh := range shells {
-		t.Run(sh, func(t *testing.T) {
-			cmd := exec.Command(sh, "--norc", "--noprofile", "-c", script)
-			cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GH_CONFIG_DIR=/leaked"}
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("bash: %v\n%s", err, out)
-			}
-			checkLines(t, string(out), want)
-		})
+	cmd := exec.Command(sh, "--norc", "--noprofile", "-c", script)
+	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GH_CONFIG_DIR=/leaked"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash: %v\n%s", err, out)
 	}
+	checkLines(t, string(out), want)
 }
 
 func TestFishHook(t *testing.T) {
@@ -123,6 +135,8 @@ cd ~/P/repo; p override-moved
 git-idm use --clear 2>/dev/null; p cleared
 git-idm use ghost 2>&1 | head -1
 printf 'rprompt=%s\n' (fish_right_prompt)
+` + bin + ` bind work ~/P/ >/dev/null 2>&1; p stale
+emit fish_prompt; p resynced
 `
 	cmd := exec.Command(fish, "--no-config", "-c", script)
 	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GH_CONFIG_DIR=/leaked"}
@@ -142,6 +156,8 @@ printf 'rprompt=%s\n' (fish_right_prompt)
 		"cleared|" + home + "/gh-personal|" + seg("36", "personal") + "|P <p@x.example>|" + sshP,
 		`git-idm: identity "ghost" does not exist`,
 		"rprompt=" + seg("36", "personal") + " USER",
+		"stale|" + home + "/gh-personal|" + seg("36", "personal") + "|W <w@x.example>|ssh 'work'",
+		"resynced|" + home + "/gh-work|" + seg("36", "work") + "|W <w@x.example>|ssh 'work'",
 	})
 }
 

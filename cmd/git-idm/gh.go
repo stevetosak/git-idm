@@ -13,6 +13,7 @@ import (
 	"github.com/stevetosak/git-idm/internal/gitgen"
 	"github.com/stevetosak/git-idm/internal/importer"
 	"github.com/stevetosak/git-idm/internal/resolve"
+	"github.com/stevetosak/git-idm/internal/shell"
 )
 
 const (
@@ -66,7 +67,7 @@ func ghEnv(environ []string) ([]string, ghTarget) {
 	if err != nil {
 		return environ, ghTarget{err: fmt.Errorf("git-idm cannot read its config, so it cannot check the gh login: %w", err)}
 	}
-	if got := envValue(environ, ghConfigEnv); got != "" && !ownedGHDir(c, got) {
+	if got := envValue(environ, ghConfigEnv); got != "" && !ownedGHDir(c, got) && got != envValue(environ, shell.GHDirEnv) {
 		return environ, ghTarget{}
 	}
 	id, ok := c.Identities[res.Identity]

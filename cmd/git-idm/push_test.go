@@ -5,7 +5,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/stevetosak/git-idm/internal/guard"
 )
 
 func TestPushGuardEndToEnd(t *testing.T) {
@@ -80,9 +83,36 @@ guard = "block"
 	if err == nil || !strings.Contains(out, "author martin@old.example") {
 		t.Fatalf("bad author must be blocked: %v\n%s", err, out)
 	}
-	if out, err := run(repo, nil, "git", "push", "-q", "--no-verify", "origin", "main"); err != nil {
-		t.Fatalf("--no-verify: %v\n%s", err, out)
+	if !strings.Contains(out, "agents:    do not go around this check") {
+		t.Fatalf("the block message must tell agents to stop:\n%s", out)
 	}
+	if !strings.Contains(out, "git-idm accept") {
+		t.Fatalf("the block message must offer git-idm accept:\n%s", out)
+	}
+	noTerminal := exec.Command(bin, "accept")
+	noTerminal.Dir = repo
+	noTerminal.Env = env
+	noTerminal.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	out2, err := noTerminal.CombinedOutput()
+	if err == nil || !strings.Contains(string(out2), "must ask on a terminal") || !strings.Contains(string(out2), "martin@old.example") {
+		t.Fatalf("accept without a terminal must refuse after it shows the batch: %v\n%s", err, out2)
+	}
+	pending, err := guard.Pending(repo)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending = %v %v", pending, err)
+	}
+	if err := guard.AcceptPending(repo, pending); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(repo, nil, "git", "push", "-q", "origin", "main"); err != nil {
+		t.Fatalf("accepted batch must push: %v\n%s", err, out)
+	}
+	must(repo, nil, "git", "commit", "-q", "--allow-empty", "--no-verify", "--author", "Martin <martin@old.example>", "-m", "new bad author")
+	out, err = run(repo, nil, "git", "push", "-q", "origin", "main")
+	if err == nil || !strings.Contains(out, "1 commit(s) to push") {
+		t.Fatalf("a new commit after accept must be blocked again: %v\n%s", err, out)
+	}
+	must(repo, nil, "git", "reset", "-q", "--hard", "HEAD~1")
 	must(repo, nil, "git", "commit", "-q", "--allow-empty", "-m", "after")
 	if out, err := run(repo, nil, "git", "push", "-q", "origin", "main"); err != nil {
 		t.Fatalf("commits already on the remote must not block: %v\n%s", err, out)
