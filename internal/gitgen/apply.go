@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stevetosak/git-idm/internal/agent"
 	"github.com/stevetosak/git-idm/internal/config"
 )
 
@@ -22,6 +23,7 @@ type Applier struct {
 	GlobalConfig string
 	Bin          string
 	BinDir       string
+	SkillPath    string
 	Now          func() time.Time
 	backupDir    string
 	backedUp     map[string]string
@@ -40,7 +42,7 @@ func NewApplier() (*Applier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, BinDir: DefaultBinDir(), Now: time.Now}, nil
+	return &Applier{ConfigDir: dir, GlobalConfig: global, Bin: bin, BinDir: DefaultBinDir(), SkillPath: agent.DefaultPath(), Now: time.Now}, nil
 }
 
 func Executable() (string, error) {
@@ -119,6 +121,15 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	if len(shim) > 0 && a.ConfigDir != "" {
 		if err := config.Touch(a.ConfigDir); err != nil {
 			return changes, err
+		}
+	}
+	if a.SkillPath != "" {
+		refreshed, err := agent.Refresh(a.SkillPath)
+		if err != nil {
+			return changes, err
+		}
+		if refreshed {
+			changes = append(changes, Change{Path: a.SkillPath, Action: "updated"})
 		}
 	}
 	current, err := readOptional(a.GlobalConfig)
