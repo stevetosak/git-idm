@@ -93,6 +93,20 @@ func TestPushChecksEveryNewCommit(t *testing.T) {
 	if strings.Contains(texts(problems), "martin@old.example") || !strings.Contains(texts(problems), "2 commit(s)") {
 		t.Errorf("allowed author still reported:\n%s", texts(problems))
 	}
+	blocked := BlockedCommits(problems)
+	if len(blocked) != 2 {
+		t.Fatalf("blocked commits = %v, want 2", blocked)
+	}
+	p.Accepted = map[string]bool{blocked[0]: true}
+	problems, _ = CheckPush(p, update(last))
+	if got := BlockedCommits(problems); len(got) != 1 || got[0] != blocked[1] {
+		t.Errorf("an accepted commit must not block, got %v", got)
+	}
+	p.Accepted[blocked[1]] = true
+	if problems, err := CheckPush(p, update(last)); err != nil || len(problems) != 0 {
+		t.Errorf("all accepted: %v %v", err, problems)
+	}
+	p.Accepted = nil
 
 	gitT(t, repo, nil, "update-ref", "refs/remotes/origin/main", last)
 	if problems, err := CheckPush(p, update(last)); err != nil || len(problems) != 0 {

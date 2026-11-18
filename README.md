@@ -62,6 +62,7 @@ echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 | `login [identity]` | log in to GitHub again when a token stops working |
 | `guard block\|warn\|off` | stop or warn about commits and pushes with the wrong identity |
 | `allow` | accept the author that one repo sets itself |
+| `accept` | approve the commits that the last blocked push stopped (asks on the terminal, so agents cannot) |
 | `init`, `migrate` | import your old setup and repo authors, then remove them |
 | `update` | update to the latest release |
 
@@ -73,7 +74,7 @@ Run `git-idm <command> --help` for flags and examples.
 - **Bound folders only:** the default identity is never used by itself. With the guard on, git refuses to commit in a folder without a rule, pushes to GitHub stop and gh is refused. `git-idm bind` binds the current repo to the default identity.
 - **git:** `git-idm apply` writes one marked block in `~/.gitconfig` with an `includeIf "gitdir:"` rule for each folder (`gitdir/i:` on macOS). Each rule loads a generated file that sets `user.name`, `user.email`, `core.sshCommand`, the signing key, a credential helper that gives git only the identity's GitHub token (or stops git), and an SSH command that checks the GitHub account of the key before each push. git does the switching itself.
 - **gh:** each identity has its own `GH_CONFIG_DIR` in `~/.config/git-idm/gh/`, and the default gh folder (`~/.config/gh`) stays logged out, so a gh that skips git-idm cannot act as anyone. `git-idm migrate` moves old logins there and checks each one with GitHub first. The shell hook sets it when you change folders, so `gh` uses the correct account. Programs that do not run the hook (scripts, editors, AI agents) get the same account through a `gh` shim in `~/.local/bin`, which `apply` installs. In a folder with an identity, the shim refuses every gh command (except `auth`, `config`, `help` and `version`) when gh is logged in to another account, when the identity has no gh login, or when `GH_TOKEN` or `GITHUB_TOKEN` is set. Skip the check once with `GIT_IDM_GH_CHECK=0`.
-- **Guard:** with `guard block`, a global pre-commit hook compares the commit author and committer with the identity of the folder. A global pre-push hook checks every commit that no remote has yet, and stops pushes that skip the git-idm account checks (a token in the remote URL, `GIT_SSH_COMMAND`, or a credential helper or `core.sshCommand` given with `-c`). Your repo hooks still run after it.
+- **Guard:** with `guard block`, a global pre-commit hook compares the commit author and committer with the identity of the folder. A global pre-push hook checks every commit that no remote has yet, and stops pushes that skip the git-idm account checks (a token in the remote URL, `GIT_SSH_COMMAND`, or a credential helper or `core.sshCommand` given with `-c`). When you want to push commits with another identity on purpose, run `git-idm accept` after the blocked push. It accepts only those commits, and the account checks still run. Your repo hooks still run after it.
 
 ## Updates
 

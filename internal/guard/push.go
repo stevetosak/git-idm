@@ -27,8 +27,17 @@ type RefUpdate struct {
 }
 
 type Problem struct {
-	Text string
-	Fix  string
+	Text    string
+	Fix     string
+	Commits []string
+}
+
+func BlockedCommits(problems []Problem) []string {
+	var shas []string
+	for _, p := range problems {
+		shas = append(shas, p.Commits...)
+	}
+	return shas
 }
 
 type Push struct {
@@ -37,6 +46,7 @@ type Push struct {
 	Name     string
 	Identity config.Identity
 	Allowed  string
+	Accepted map[string]bool
 	Bin      string
 	Strict   bool
 	Getenv   func(string) string
@@ -198,13 +208,13 @@ func configEntries(dir, pattern string) ([]configEntry, error) {
 
 func commitProblems(p Push, updates []RefUpdate) ([]Problem, error) {
 	v := Verdict{Expected: p.Identity.Email, AllowedEmail: p.Allowed}
-	var bad []string
-	count := 0
+	var bad, blocked []string
+	seen := map[string]bool{}
 	for _, u := range updates {
 		if u.LocalSHA == zeroSHA || strings.Trim(u.LocalSHA, "0") == "" {
 			continue
 		}
-		args := []string{"log", "--format=%h%x1f%ae%x1f%ce", u.LocalSHA, "--not", "--remotes"}
+		args := []string{"log", "--format=%H%x1f%h%x1f%ae%x1f%ce", u.LocalSHA, "--not", "--remotes"}
 		if strings.Trim(u.RemoteSHA, "0") != "" {
 			if _, err := git(p.Dir, "cat-file", "-e", u.RemoteSHA+"^{commit}"); err == nil {
 				args = append(args, u.RemoteSHA)
@@ -216,30 +226,33 @@ func commitProblems(p Push, updates []RefUpdate) ([]Problem, error) {
 		}
 		for _, line := range strings.Split(out, "\n") {
 			f := strings.Split(line, "\x1f")
-			if len(f) != 3 {
+			if len(f) != 4 || seen[f[0]] || p.Accepted[f[0]] {
 				continue
 			}
+			seen[f[0]] = true
 			var wrong []string
-			authorOK, committerOK := v.Accepts(f[1]), v.Accepts(f[2])
+			author, committer := f[2], f[3]
+			authorOK, committerOK := v.Accepts(author), v.Accepts(committer)
 			switch {
-			case !authorOK && !committerOK && strings.EqualFold(f[1], f[2]):
-				wrong = append(wrong, "author and committer "+f[1])
+			case !authorOK && !committerOK && strings.EqualFold(author, committer):
+				wrong = append(wrong, "author and committer "+author)
 			default:
 				if !authorOK {
-					wrong = append(wrong, "author "+f[1])
+					wrong = append(wrong, "author "+author)
 				}
 				if !committerOK {
-					wrong = append(wrong, "committer "+f[2])
+					wrong = append(wrong, "committer "+committer)
 				}
 			}
 			if len(wrong) > 0 {
-				count++
+				blocked = append(blocked, f[0])
 				if len(bad) < 5 {
-					bad = append(bad, f[0]+" "+strings.Join(wrong, ", "))
+					bad = append(bad, f[1]+" "+strings.Join(wrong, ", "))
 				}
 			}
 		}
 	}
+	count := len(blocked)
 	if count == 0 {
 		return nil, nil
 	}
@@ -247,5 +260,9 @@ func commitProblems(p Push, updates []RefUpdate) ([]Problem, error) {
 	if count > len(bad) {
 		text += fmt.Sprintf("\n    and %d more", count-len(bad))
 	}
-	return []Problem{{Text: text, Fix: "git commit --amend --reset-author --no-edit (last commit), git rebase -i to fix older ones, or git-idm allow (if on purpose)"}}, nil
+	return []Problem{{
+		Text:    text,
+		Fix:     "git-idm accept (approve these commits, you must run it in a terminal), git commit --amend --reset-author --no-edit (last commit), or git rebase -i to fix older ones",
+		Commits: blocked,
+	}}, nil
 }
