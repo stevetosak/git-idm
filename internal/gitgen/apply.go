@@ -116,6 +116,11 @@ func (a *Applier) Apply(c *config.Config) ([]Change, error) {
 	if err != nil {
 		return changes, err
 	}
+	if len(shim) > 0 && a.ConfigDir != "" {
+		if err := config.Touch(a.ConfigDir); err != nil {
+			return changes, err
+		}
+	}
 	current, err := readOptional(a.GlobalConfig)
 	if err != nil {
 		return changes, err

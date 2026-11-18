@@ -2,18 +2,20 @@ package shell
 
 import "github.com/stevetosak/git-idm/internal/gitgen"
 
-func Hook(sh Shell, bin string) string {
+func Hook(sh Shell, bin, stamp string) string {
 	switch sh {
 	case Bash:
-		return bashHook(bin)
+		return bashHook(bin, stamp)
 	case Fish:
-		return fishHook(bin)
+		return fishHook(bin, stamp)
 	}
-	return zshHook(bin)
+	return zshHook(bin, stamp)
 }
 
-func zshHook(bin string) string {
+func zshHook(bin, stamp string) string {
 	return `typeset -g _GIT_IDM_BIN=` + gitgen.ShellQuote(bin) + `
+typeset -g _GIT_IDM_STAMP=` + gitgen.ShellQuote(stamp) + `
+typeset -g _GIT_IDM_SEEN
 git-idm() {
   if [[ "$1" == use ]]; then
     local out
@@ -26,11 +28,20 @@ git-idm() {
   fi
 }
 _git_idm_sync() {
-  local out
+  local before="$_GIT_IDM_SEEN" out
+  _GIT_IDM_SEEN=
+  { read -r _GIT_IDM_SEEN < "$_GIT_IDM_STAMP" } 2>/dev/null
+  [[ "$_GIT_IDM_SEEN" == "$before" ]] || rehash
   out="$("$_GIT_IDM_BIN" env --shell=zsh 2>/dev/null)" && eval "$out"
+}
+_git_idm_precmd() {
+  local stamp=
+  { read -r stamp < "$_GIT_IDM_STAMP" } 2>/dev/null
+  [[ "$stamp" == "$_GIT_IDM_SEEN" ]] || _git_idm_sync
 }
 autoload -Uz add-zsh-hook
 add-zsh-hook chpwd _git_idm_sync
+add-zsh-hook precmd _git_idm_precmd
 _git_idm_sync
 setopt prompt_subst
 if [[ "$RPROMPT" != *` + SegmentVar + `* ]]; then
@@ -39,8 +50,10 @@ fi
 `
 }
 
-func bashHook(bin string) string {
+func bashHook(bin, stamp string) string {
 	return `_GIT_IDM_BIN=` + gitgen.ShellQuote(bin) + `
+_GIT_IDM_STAMP=` + gitgen.ShellQuote(stamp) + `
+_GIT_IDM_SEEN=
 git-idm() {
   if [[ "$1" == use ]]; then
     local out
@@ -53,11 +66,18 @@ git-idm() {
   fi
 }
 _git_idm_sync() {
-  local out
+  local before="$_GIT_IDM_SEEN" out
+  _GIT_IDM_SEEN=
+  { read -r _GIT_IDM_SEEN < "$_GIT_IDM_STAMP"; } 2>/dev/null
+  if [[ "$_GIT_IDM_SEEN" != "$before" ]]; then
+    hash -r
+  fi
   out="$("$_GIT_IDM_BIN" env --shell=bash 2>/dev/null)" && eval "$out"
 }
 _git_idm_prompt() {
-  if [[ "$PWD" != "${_GIT_IDM_PWD-}" ]]; then
+  local stamp=
+  { read -r stamp < "$_GIT_IDM_STAMP"; } 2>/dev/null
+  if [[ "$PWD" != "${_GIT_IDM_PWD-}" || "$stamp" != "$_GIT_IDM_SEEN" ]]; then
     _GIT_IDM_PWD="$PWD"
     _git_idm_sync
   fi
@@ -76,8 +96,10 @@ fi
 `
 }
 
-func fishHook(bin string) string {
+func fishHook(bin, stamp string) string {
 	return `set -g _GIT_IDM_BIN ` + fishQuote(bin) + `
+set -g _GIT_IDM_STAMP ` + fishQuote(stamp) + `
+set -g _GIT_IDM_SEEN ''
 function git-idm
     if test "$argv[1]" = use
         set -l code ($_GIT_IDM_BIN use --shell=fish $argv[2..-1])
@@ -90,11 +112,19 @@ function git-idm
         return $rc
     end
 end
+function _git_idm_stamp
+    test -r $_GIT_IDM_STAMP; and read -l stamp < $_GIT_IDM_STAMP; and echo $stamp
+end
 function _git_idm_sync
+    set -g _GIT_IDM_SEEN (_git_idm_stamp)
     $_GIT_IDM_BIN env --shell=fish 2>/dev/null | source
 end
 function _git_idm_on_pwd --on-variable PWD
     _git_idm_sync
+end
+function _git_idm_on_prompt --on-event fish_prompt
+    set -l stamp (_git_idm_stamp)
+    test "$stamp" = "$_GIT_IDM_SEEN"; or _git_idm_sync
 end
 _git_idm_sync
 if not functions -q _git_idm_user_right_prompt
