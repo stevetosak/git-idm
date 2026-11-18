@@ -9,6 +9,7 @@ import (
 
 	"github.com/stevetosak/git-idm/internal/config"
 	"github.com/stevetosak/git-idm/internal/gitgen"
+	"github.com/stevetosak/git-idm/internal/shell"
 )
 
 func executable(t *testing.T, path string) {
@@ -107,15 +108,18 @@ func ghConfigDir(env []string) string {
 func TestGHEnvFollowsFolder(t *testing.T) {
 	home := ghSandbox(t)
 	cases := []struct {
-		dir, inherited, override, want string
+		dir, inherited, hookSet, override, want string
 	}{
-		{"client/repo", home + "/gh-work", "", home + "/gh-client"},
-		{"client/repo", "", "", home + "/gh-client"},
-		{"other", home + "/gh-client", "", "<unset>"},
-		{"other", home + "/gh-client", "work", home + "/gh-work"},
-		{"plain", home + "/gh-work", "", "<unset>"},
-		{"client/repo", "/my/own/gh", "", "/my/own/gh"},
-		{"client/repo", home + "/gh-client", "work", home + "/gh-work"},
+		{"client/repo", home + "/gh-work", "", "", home + "/gh-client"},
+		{"client/repo", "", "", "", home + "/gh-client"},
+		{"other", home + "/gh-client", "", "", "<unset>"},
+		{"other", home + "/gh-client", "", "work", home + "/gh-work"},
+		{"plain", home + "/gh-work", "", "", "<unset>"},
+		{"client/repo", "/my/own/gh", "", "", "/my/own/gh"},
+		{"client/repo", home + "/gh-client", "", "work", home + "/gh-work"},
+		{"client/repo", home + "/gh-moved", home + "/gh-moved", "", home + "/gh-client"},
+		{"plain", home + "/gh-moved", home + "/gh-moved", "", "<unset>"},
+		{"client/repo", "/my/own/gh", home + "/gh-moved", "", "/my/own/gh"},
 	}
 	for _, tc := range cases {
 		t.Chdir(filepath.Join(home, tc.dir))
@@ -123,6 +127,9 @@ func TestGHEnvFollowsFolder(t *testing.T) {
 		environ := []string{"PATH=/bin"}
 		if tc.inherited != "" {
 			environ = append(environ, ghConfigEnv+"="+tc.inherited)
+		}
+		if tc.hookSet != "" {
+			environ = append(environ, shell.GHDirEnv+"="+tc.hookSet)
 		}
 		got, _ := ghEnv(environ)
 		if dir := ghConfigDir(got); dir != tc.want {

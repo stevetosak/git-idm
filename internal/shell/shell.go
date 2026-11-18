@@ -32,6 +32,7 @@ func Parse(name string) (Shell, error) {
 
 const (
 	SegmentVar = "_GIT_IDM_SEGMENT"
+	GHDirEnv   = "_GIT_IDM_GH_DIR"
 	ghEnv      = "GH_CONFIG_DIR"
 	countEnv   = "GIT_CONFIG_COUNT"
 )
@@ -40,9 +41,11 @@ func Sync(sh Shell, c *config.Config, res resolve.Result) string {
 	var b strings.Builder
 	id, known := c.Identities[res.Identity]
 	if known && id.GHConfigDir != "" {
-		export(sh, &b, ghEnv, config.ExpandHome(id.GHConfigDir))
+		dir := config.ExpandHome(id.GHConfigDir)
+		export(sh, &b, ghEnv, dir)
+		export(sh, &b, GHDirEnv, dir)
 	} else {
-		unset(sh, &b, ghEnv)
+		unset(sh, &b, ghEnv, GHDirEnv)
 	}
 	export(sh, &b, SegmentVar, Segment(sh, c, res))
 	return b.String()
