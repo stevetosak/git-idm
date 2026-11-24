@@ -61,7 +61,7 @@ echo 'git-idm hook fish | source' >> ~/.config/fish/config.fish   # fish
 | `doctor` | check keys, gh logins, tokens, hooks, the shell and repo configs |
 | `login [identity]` | log in to GitHub again when a token stops working |
 | `guard block\|warn\|off` | stop or warn about commits and pushes with the wrong identity |
-| `allow` | accept the author that one repo sets itself |
+| `allow [email]` | accept one more author email in one repo |
 | `accept` | approve the commits that the last blocked push stopped (asks on the terminal, so agents cannot) |
 | `agent [install\|remove]` | print the rules for AI agents, or install them as a Claude Code skill |
 | `init`, `migrate` | import your old setup and repo authors, then remove them |

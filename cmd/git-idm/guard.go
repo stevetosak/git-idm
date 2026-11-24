@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/mail"
 	"os"
 	"strings"
 
@@ -58,9 +59,10 @@ func newGuardCmd() *cobra.Command {
 func newAllowCmd() *cobra.Command {
 	var remove bool
 	cmd := &cobra.Command{
-		Use:   "allow",
-		Short: "Accept the commit author that this repo sets itself",
-		Args:  cobra.NoArgs,
+		Use:   "allow [email]",
+		Short: "Accept a commit author in this repo",
+		Long:  "Accept a commit author in this repo. With no email, accept the author that git config gives in this repo.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, res, err := current()
 			if err != nil {
@@ -81,13 +83,19 @@ func newAllowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if strings.EqualFold(v.Expected, v.Actual) {
-				return fmt.Errorf("the author %s is already the expected identity, nothing to allow", v.Actual)
+			email := v.Actual
+			if len(args) == 1 {
+				if email, err = validEmail(args[0]); err != nil {
+					return err
+				}
 			}
-			if err := guard.Allow(res.RepoRoot, v.Actual); err != nil {
+			if strings.EqualFold(v.Expected, email) {
+				return fmt.Errorf("the author %s is already the expected identity, nothing to allow", email)
+			}
+			if err := guard.Allow(res.RepoRoot, email); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "commits in %s may use %s (undo: git-idm allow --remove)\n", config.ContractHome(res.RepoRoot), v.Actual)
+			fmt.Fprintf(out, "commits in %s may use %s (undo: git-idm allow --remove)\n", config.ContractHome(res.RepoRoot), email)
 			return nil
 		},
 	}
@@ -176,8 +184,31 @@ func printMismatch(w io.Writer, c *config.Config, res resolve.Result, v guard.Ve
 			fix("git config --local --unset-all user.email", "use the git-idm identity")
 		}
 	}
-	fix("git-idm allow", "accept this author in this repo")
+	if email := allowableEmail(v); email != "" {
+		fix("git-idm allow "+email, "accept this email in this repo")
+	}
 	fix("git commit --no-verify", "skip the check once")
+}
+
+func allowableEmail(v guard.Verdict) string {
+	var wrong []string
+	for _, email := range []string{v.Actual, v.Committer} {
+		if email != "" && !v.Accepts(email) {
+			wrong = append(wrong, email)
+		}
+	}
+	if len(wrong) == 0 || (len(wrong) == 2 && !strings.EqualFold(wrong[0], wrong[1])) {
+		return ""
+	}
+	return wrong[0]
+}
+
+func validEmail(s string) (string, error) {
+	addr, err := mail.ParseAddress(s)
+	if err != nil || addr.Address != s || strings.ContainsAny(s, " \t\r\n") {
+		return "", fmt.Errorf("%q is not a valid email address", s)
+	}
+	return s, nil
 }
 
 func globalHooksPathOutsideBlock() string {

@@ -61,6 +61,10 @@ git-idm allow --remove >/dev/null; git config --unset user.email
 git-idm use work 2>/dev/null; c override
 git-idm use --clear 2>/dev/null
 GIT_AUTHOR_EMAIL=env@x.example c env-author
+grep -o 'git-idm allow env@x.example' $HOME/commit-err
+git-idm allow 'bad mail' 2>&1
+git-idm allow env@x.example >/dev/null; GIT_AUTHOR_EMAIL=env@x.example c env-allowed
+git-idm allow --remove >/dev/null
 git config user.email other@x.example
 git-idm guard warn >/dev/null; c local-warn
 git-idm guard block >/dev/null
@@ -81,6 +85,9 @@ git-idm guard off >/dev/null; print -r -- "hooksPath after off: $(git config --g
 		"allowed ok",
 		"override ok",
 		"env-author blocked: git-idm blocked: this commit uses the wrong identity",
+		"git-idm allow env@x.example",
+		"git-idm: \"bad mail\" is not a valid email address",
+		"env-allowed ok",
 		"local-warn ok git-idm warning: this commit uses the wrong identity",
 		"binary-missing ok git-idm: identity guard skipped, " + bin + " not found (run: git-idm doctor)",
 		"hooksPath after off: unset",
@@ -112,5 +119,32 @@ func TestMismatchHintForLocalAuthor(t *testing.T) {
 	printMismatch(&out, c, resolve.Result{Identity: "work", Source: resolve.SourceOverride, LocalEmail: "martin@old.example"}, v)
 	if !strings.Contains(out.String(), "git config --local --unset-all user.email") || strings.Contains(out.String(), "migrate") {
 		t.Errorf("without a rule:\n%s", out.String())
+	}
+}
+
+func TestMismatchHintNamesTheEmailToAllow(t *testing.T) {
+	c := config.New()
+	c.Guard = config.GuardBlock
+	res := resolve.Result{Identity: "work", Source: resolve.SourceRule, Rule: &config.Rule{Path: "~/Projects/", Identity: "work"}}
+	cases := []struct {
+		name string
+		v    guard.Verdict
+		want string
+	}{
+		{"author", guard.Verdict{Actual: "a@x.example", Committer: "w@x.example", Expected: "w@x.example"}, "git-idm allow a@x.example"},
+		{"committer", guard.Verdict{Actual: "w@x.example", Committer: "c@x.example", Expected: "w@x.example"}, "git-idm allow c@x.example"},
+		{"same", guard.Verdict{Actual: "s@x.example", Committer: "S@x.example", Expected: "w@x.example"}, "git-idm allow s@x.example"},
+		{"two", guard.Verdict{Actual: "a@x.example", Committer: "c@x.example", Expected: "w@x.example"}, ""},
+	}
+	for _, tc := range cases {
+		var out bytes.Buffer
+		printMismatch(&out, c, res, tc.v)
+		got := out.String()
+		if tc.want == "" && strings.Contains(got, "git-idm allow") {
+			t.Errorf("%s: allow cannot fix two emails:\n%s", tc.name, got)
+		}
+		if tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%s: want %q in:\n%s", tc.name, tc.want, got)
+		}
 	}
 }
